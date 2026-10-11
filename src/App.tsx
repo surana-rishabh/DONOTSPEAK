@@ -8,7 +8,7 @@ import { SCARE_DURATION_MS, type ScareKind } from "./render/scenePolicy";
 import { ShadowPortrait } from "./ui/ShadowPortrait";
 
 type VoiceStatus = "idle" | "connecting" | "live" | "muted" | "transcribing" | "offline";
-type Health = { ok: boolean; gemma: boolean; elevenLabs: boolean };
+type Health = { ok: boolean; gemma: boolean; elevenLabs: boolean; checked?: boolean };
 const voice = new VoiceChannel(); const ambient = new AmbientDirector();
 const RoomView = lazy(() => import("./render/RoomView").then(module => ({ default: module.RoomView })));
 function App() {
@@ -41,7 +41,7 @@ function App() {
   const active = state.phase === "active"; const busy = !active || traveling || voiceStatus === "transcribing";
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/health", { signal: controller.signal }).then((r) => r.json()).then((data) => setHealth(data)).catch(() => undefined);
+    void fetch("/api/health", { signal: controller.signal }).then((r) => r.json()).then((data) => setHealth({ ...data, checked: true })).catch(() => undefined);
     return () => { controller.abort(); controllerRef.current?.abort(); voice.close(); ambient.stop(); };
   }, []);
   useEffect(() => { ambient.setVolume(volume); voice.setVolume(volume); }, [volume]);
@@ -93,11 +93,15 @@ function App() {
   }, [state.phase, state.callId, reducedMotion, plain]);
 
   async function speak(text: string, speaker: "caller" | "mimic" = "caller") {
+    if (health.checked && !health.elevenLabs) {
+      setVoiceDetail(t("Voice needs ELEVENLABS_API_KEY in Vercel Production, then a redeploy. Captions remain available.", "आवाज़ के लिए Vercel Production में ELEVENLABS_API_KEY जोड़कर फिर डिप्लॉय करें। लिखित बातें उपलब्ध हैं।"));
+      return;
+    }
     const run = runRef.current; const speech = ++speechRef.current; setSpeaking(true);
     const played = await voice.speak(text, speaker, stateRef.current.blueprint.caller.name, stateRef.current.language);
     if (run !== runRef.current || speech !== speechRef.current) return;
     setSpeaking(false);
-    if (!played && volume > 0) setVoiceDetail(t("Voice output unavailable; read the captions.", "आवाज़ उपलब्ध नहीं है; नीचे लिखी बात पढ़ें।"));
+    if (!played && volume > 0) setVoiceDetail(voice.lastSpeechError || t("Voice output unavailable; read the captions.", "आवाज़ उपलब्ध नहीं है; नीचे लिखी बात पढ़ें।"));
     else setVoiceDetail("");
   }
   async function resolveTurn(text: string) {

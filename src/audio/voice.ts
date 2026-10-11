@@ -7,6 +7,7 @@ type RecognitionResult = { resultIndex: number; results: ArrayLike<{ isFinal: bo
 type BrowserRecognition = { lang: string; continuous: boolean; interimResults: boolean; onresult: ((event: RecognitionResult) => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void; abort: () => void };
 
 export class VoiceChannel {
+  lastSpeechError = "";
   private stream: MediaStream | null = null;
   private recorder: MediaRecorder | null = null;
   private callbacks: VoiceCallbacks | null = null;
@@ -164,12 +165,16 @@ export class VoiceChannel {
     if (this.activeGain && this.context) this.activeGain.gain.setTargetAtTime(this.volume, this.context.currentTime, 0.04);
   }
   async speak(text: string, speaker: "caller" | "mimic" | "operator", character: string, language: Language = this.language) {
+    this.lastSpeechError = "";
     this.stopSpeech(); if (this.volume <= 0) return true;
     const serial = this.speechSerial; const controller = new AbortController(); this.speechAbort = controller;
     try {
       await this.unlock();
       const response = await fetch("/api/voice/stream", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, speaker, character, language }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(16000)]) });
-      if (!response.ok) throw new Error("Speech unavailable");
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(detail?.error || `Speech unavailable (${response.status})`);
+      }
       const context = this.context!; const buffer = await context.decodeAudioData(await response.arrayBuffer());
       if (serial !== this.speechSerial) return false;
       const source = context.createBufferSource(); const gain = context.createGain(); source.buffer = buffer;
@@ -179,6 +184,7 @@ export class VoiceChannel {
       return serial === this.speechSerial;
     } catch (error) {
       if (controller.signal.aborted) return false;
+      this.lastSpeechError = error instanceof Error ? error.message : "Voice playback unavailable";
       console.warn("ElevenLabs playback unavailable:", error instanceof Error ? error.message : "unknown playback error");
       return false;
     }

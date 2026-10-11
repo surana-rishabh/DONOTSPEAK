@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { legacyMaterials } from "./legacyMaterials";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { GameState } from "../game/engine";
@@ -168,6 +169,7 @@ export class RoomRenderer {
       if (!response.ok) throw new Error("Model manifest unavailable");
       const manifest = await response.json() as { models: ModelAsset[] };
       const loader = new GLTFLoader();
+      loader.register(legacyMaterials);
       this.draco.setDecoderPath("/draco/");
       loader.setDRACOLoader(this.draco);
 
