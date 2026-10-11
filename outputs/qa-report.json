@@ -1,0 +1,31 @@
+{
+  "capturedAt": "2026-10-10T22:22:11.082Z",
+  "issues": [],
+  "providerEvents": [
+    {
+      "endpoint": "/api/voice/stream",
+      "source": "elevenlabs",
+      "durationMs": 0
+    },
+    {
+      "endpoint": "/api/turns/resolve",
+      "source": "gemma",
+      "durationMs": 6182
+    },
+    {
+      "endpoint": "/api/voice/stream",
+      "source": "elevenlabs",
+      "durationMs": 0
+    },
+    {
+      "endpoint": "/api/turns/resolve",
+      "source": "gemma",
+      "durationMs": 6590
+    },
+    {
+      "endpoint": "/api/voice/stream",
+      "source": "elevenlabs",
+      "durationMs": 0
+    }
+  ]
+}

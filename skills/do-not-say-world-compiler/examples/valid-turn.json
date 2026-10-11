@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "interpretation": "Move the caller toward the threshold under the red fixture.",
+  "action": {
+    "kind": "move",
+    "targetId": "red_door"
+  },
+  "learnedConcepts": [],
+  "mutations": [
+    {
+      "kind": "move_actor",
+      "targetId": "caller",
+      "value": "door"
+    }
+  ],
+  "response": {
+    "speaker": "caller",
+    "text": "I am beside it. The handle is moving without me.",
+    "emotion": "afraid"
+  },
+  "dangerDelta": 0,
+  "outcome": "continue"
+}

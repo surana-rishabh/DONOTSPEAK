@@ -1,0 +1,47 @@
+{
+  "name": "do-not-say-it",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c magenta,cyan \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "tsx watch server/index.ts",
+    "dev:web": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "start": "tsx server/index.ts",
+    "test": "tsx --test server/**/*.test.ts",
+    "check": "tsc -b --pretty false",
+    "qa:visual": "node --import tsx scripts/visual-qa.mjs",
+    "qa:visual:integrated": "set QA_START_SERVER=1&& node --import tsx scripts/visual-qa.mjs",
+    "qa:voice": "node --import tsx scripts/voice-qa.mjs",
+    "smoke:providers": "tsx scripts/provider-smoke.ts",
+    "check:env": "tsx scripts/check-env.ts"
+  },
+  "dependencies": {
+    "@elevenlabs/client": "^1.27.0",
+    "@google/genai": "^1.27.0",
+    "@types/three": "^0.186.0",
+    "dotenv": "^18.0.7",
+    "express": "^5.1.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "three": "^0.186.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.9.1",
+    "@types/react": "^19.1.16",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "concurrently": "^9.2.1",
+    "playwright-core": "^1.64.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
