@@ -2,13 +2,14 @@ import "dotenv/config";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServer } from "node:http";
 import { z } from "zod";
 import { GenerateCallRequestSchema, TurnRequestSchema } from "../shared/contracts.js";
 import { createScribeToken, synthesizeSpeech, transcribeAudio } from "./elevenLabs.js";
 import { FALLBACK_CALLS } from "../src/game/catalog.js";
 import { fallbackWorldTurn, generateWorldCall, resolveWorldTurn } from "./worldCompiler.js";
 
-const app = express();
+export const app = express();
 const port = Number(process.env.PORT || 8080);
 app.disable("x-powered-by");
 app.use(express.json({ limit: "2mb" }));
@@ -120,4 +121,5 @@ app.use((error: { status?: number }, _request: express.Request, response: expres
 app.use(express.static(dist, { maxAge: "1h" }));
 app.get("/{*path}", (_request, response) => response.sendFile(path.join(dist, "index.html")));
 
-export const server = app.listen(port, process.env.HOST || "127.0.0.1", () => console.log(`DO NOT SAY IT listening on http://localhost:${port}`));
+export const server = createServer(app);
+if (!process.env.VERCEL) server.listen(port, process.env.HOST || "127.0.0.1", () => console.log(`DO NOT SAY IT listening on http://localhost:${port}`));

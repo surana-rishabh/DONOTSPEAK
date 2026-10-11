@@ -4,7 +4,7 @@ import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { GameState } from "../game/engine";
 import { STATIONS, STATION_POSITIONS } from "../../shared/rules";
-import { buildSafeRoute, scareTransition, type ScareKind } from "./scenePolicy";
+import { buildSafeRoute, scareTransition, SCARE_DURATION_MS, type ScareKind } from "./scenePolicy";
 import { CallerAnimator } from "./CallerAnimator";
 
 const CAMERAS = [
@@ -41,6 +41,11 @@ export class RoomRenderer {
   private paused = false;
   private raf = 0;
   private lastTime = performance.now();
+  private onVisibility = () => {
+    cancelAnimationFrame(this.raf);
+    this.lastTime = performance.now();
+    this.loop();
+  };
   private resizeObserver: ResizeObserver;
   private draco = new DRACOLoader();
   private loadedAssets: THREE.Object3D[] = [];
@@ -53,7 +58,10 @@ export class RoomRenderer {
   private difference = new THREE.Vector3();
   private followGoal = new THREE.Vector3();
   private mimicGoal = new THREE.Vector3();
-  private scare: { kind: ScareKind; started: number; actorStart: THREE.Vector3; cameraStart: THREE.Vector3 } | null = null;
+  private scare: { kind: ScareKind; started: number; actorStart: THREE.Vector3; actorRotation: number; cameraStart: THREE.Vector3; targetStart: THREE.Vector3 } | null = null;
+  private scareLight = new THREE.PointLight(0xdccac5, 0, 3, 2);
+  private lastRender = 0;
+  private mobile = false;
   public onTravelChange?: (moving: boolean) => void;
   public onScareChange?: (kind: ScareKind | null) => void;
   private projected = new THREE.Vector3();
@@ -65,18 +73,21 @@ export class RoomRenderer {
     if (offset.lengthSq()) { event.preventDefault(); this.camera.position.add(offset); this.controls.target.add(offset); }
   };
   constructor(private canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, innerWidth < 700 ? 1.1 : 1.35));
+    const mobile = innerWidth < 700 || window.matchMedia("(pointer: coarse)").matches;
+    this.mobile = mobile;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !mobile, powerPreference: mobile ? "default" : "high-performance" });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, mobile ? 1 : 1.35));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.06;
-    this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.enabled = !mobile; this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.scene.background = new THREE.Color(0x060b0d); this.scene.fog = new THREE.FogExp2(0x071013, 0.024);
     this.scene.add(new THREE.HemisphereLight(0x9ab6ba, 0x17201d, 1.08));
     this.keyLight.position.set(-2.8, 7.5, 4.5); this.keyLight.target.position.set(0, 0.4, -0.7);
     this.keyLight.castShadow = true; this.keyLight.shadow.mapSize.set(innerWidth < 700 ? 512 : 1024, innerWidth < 700 ? 512 : 1024);
     this.keyLight.shadow.camera.near = 1; this.keyLight.shadow.camera.far = 24; this.keyLight.shadow.bias = -0.0004;
     this.scene.add(this.keyLight, this.keyLight.target);
+    this.scene.add(this.scareLight);
     const blue = new THREE.PointLight(0x79c9d5, 26, 13, 2); blue.position.set(-2.2, 3.1, 1.8); this.scene.add(blue);
     this.lamp.position.set(2.7, 2.4, 0.2); this.scene.add(this.lamp);
     this.controls = new OrbitControls(this.camera, canvas);
@@ -98,6 +109,7 @@ export class RoomRenderer {
     };
     this.resizeObserver = new ResizeObserver(resize); this.resizeObserver.observe(canvas); resize();
     canvas.addEventListener("keydown", this.onKey);
+    document.addEventListener("visibilitychange", this.onVisibility);
     void this.loadModels(); this.loop();
   }
   private box(name: string, size: [number, number, number], pos: [number, number, number], color: number, parent: THREE.Object3D = this.scene) {
@@ -250,13 +262,21 @@ export class RoomRenderer {
       if (!this.disposed) this.canvas.dataset.modelsError = error instanceof Error ? error.message : "Model loading failed";
     }
   }
-  setReducedMotion(value: boolean) { this.reducedMotion = value; this.controls.enableDamping = !value; }
+  private finishScare() {
+    if (!this.scare) return;
+    const actor = this.scare.kind === "mimic" ? this.mimic : this.caller;
+    actor.position.copy(this.scare.actorStart); actor.rotation.y = this.scare.actorRotation;
+    this.camera.position.copy(this.scare.cameraStart); this.controls.target.copy(this.scare.targetStart); this.camera.lookAt(this.controls.target);
+    this.controls.enabled = true; this.scareLight.intensity = 0;
+    this.scare = null; delete this.canvas.dataset.scare; delete this.canvas.dataset.scareDistance; this.onScareChange?.(null);
+  }
+  setReducedMotion(value: boolean) { this.reducedMotion = value; this.controls.enableDamping = !value; if (value) this.finishScare(); }
   setPaused(value: boolean) {
     if (value === this.paused) return;
     this.paused = value;
     if (value) {
       cancelAnimationFrame(this.raf); this.path = []; this.onTravelChange?.(false);
-      this.scare = null; delete this.canvas.dataset.scare; this.onScareChange?.(null);
+      this.finishScare();
     }
     else { this.lastTime = performance.now(); this.loop(); }
   }
@@ -274,6 +294,7 @@ export class RoomRenderer {
     const newCall = state.callId !== this.currentState?.callId;
     const newPosition = state.callerPosition !== this.currentState?.callerPosition;
     if (newCall) {
+      this.finishScare();
       this.caller.position.set(...STATION_POSITIONS[state.callerPosition]); this.target.copy(this.caller.position); this.path = []; this.onTravelChange?.(false);
     }
     if (newPosition && !newCall && this.paused) {
@@ -293,15 +314,35 @@ export class RoomRenderer {
   }
   private startScare(kind: ScareKind) {
     const actor = kind === "mimic" ? this.mimic : this.caller;
-    this.scare = { kind, started: performance.now(), actorStart: actor.position.clone(), cameraStart: this.camera.position.clone() };
+    this.scare = { kind, started: performance.now(), actorStart: actor.position.clone(), actorRotation: actor.rotation.y, cameraStart: this.camera.position.clone(), targetStart: this.controls.target.clone() };
+    this.controls.enabled = false;
+    const forward = this.camera.getWorldDirection(new THREE.Vector3()); forward.y = 0;
+    if (forward.lengthSq() < 0.01) forward.set(0, 0, -1); else forward.normalize();
+    this.controls.target.copy(this.camera.position).add(forward);
+    this.camera.lookAt(this.controls.target);
+    actor.rotation.y = Math.atan2(-forward.x, -forward.z);
+    actor.updateWorldMatrix(true, true);
+    let head: THREE.Object3D | undefined;
+    actor.traverse(node => { if (!head && node instanceof THREE.Bone && /head/i.test(node.name)) head = node; });
+    const headOffset = head ? head.getWorldPosition(new THREE.Vector3()).sub(actor.position) : new THREE.Vector3(0, 1.6, 0);
+    headOffset.y += 0.12;
+    actor.position.copy(this.camera.position).addScaledVector(forward, 0.42).sub(headOffset);
+    actor.visible = true;
+    this.scareLight.position.copy(this.camera.position).addScaledVector(forward, 0.12);
+    this.scareLight.intensity = kind === "mimic" ? 2 : 0.7;
+    this.canvas.dataset.scareDistance = "0.42";
     this.onScareChange?.(kind); this.canvas.dataset.scare = kind;
+    this.renderer.render(this.scene, this.camera);
   }
   private loop = () => {
-    if (this.disposed || this.paused) return;
+    if (this.disposed || this.paused || document.hidden) return;
+    const frameTime = performance.now();
+    if (frameTime - this.lastRender < 1000 / (this.mobile && !this.scare ? 30 : 60)) { this.raf = requestAnimationFrame(this.loop); return; }
+    this.lastRender = frameTime;
     const now = performance.now(); const dt = Math.min(0.05, (now - this.lastTime) / 1000); this.lastTime = now;
     const previousX = this.caller.position.x; const previousZ = this.caller.position.z;
     const destination = this.path[0];
-    if (destination) {
+    if (destination && !this.scare) {
       const difference = this.difference.copy(destination).sub(this.caller.position); difference.y = 0;
       const distance = difference.length(); const step = dt * 1.48;
       if (this.reducedMotion || distance <= step) {
@@ -309,7 +350,7 @@ export class RoomRenderer {
         if (!this.path.length) this.onTravelChange?.(false);
       } else { this.caller.position.addScaledVector(difference.normalize(), step); this.caller.rotation.y = Math.atan2(difference.x, difference.z); }
     }
-    this.caller.position.y = 0;
+    if (!this.scare || this.scare.kind !== "caller") this.caller.position.y = 0;
     this.caller.rotation.z = 0;
     this.callerAnimator?.update(dt, Math.hypot(this.caller.position.x - previousX, this.caller.position.z - previousZ), this.reducedMotion);
     if (this.currentState?.mimicVisible) {
@@ -317,7 +358,7 @@ export class RoomRenderer {
       this.mimicGoal.set(position[0] + 0.6, 0, position[2]);
       if (!this.scare || this.scare.kind !== "mimic") this.mimic.position.lerp(this.mimicGoal, this.reducedMotion ? 1 : 1 - Math.exp(-dt * 0.9));
     }
-    if (this.cameraIndex === 3 && this.path.length) {
+    if (this.cameraIndex === 3 && this.path.length && !this.scare) {
       this.followGoal.set(this.caller.position.x, this.caller.position.y + 5, this.caller.position.z + 7);
       this.camera.position.lerp(this.followGoal, 1 - Math.exp(-dt * 1.3));
       this.followGoal.set(this.caller.position.x, this.caller.position.y + 0.8, this.caller.position.z);
@@ -328,25 +369,12 @@ export class RoomRenderer {
       this.camera.position.lerp(this.cameraGoal, 1 - Math.exp(-dt * 8)); this.controls.target.lerp(this.cameraTargetGoal, 1 - Math.exp(-dt * 8));
     }
     if (this.scare) {
-      const duration = this.scare.kind === "mimic" ? 920 : 1050; const progress = Math.min(1, (now - this.scare.started) / duration);
-      const actor = this.scare.kind === "mimic" ? this.mimic : this.caller;
-      const forward = this.camera.getWorldDirection(this.followGoal);
-      const nearCamera = this.followGoal.multiplyScalar(1.15).add(this.camera.position); nearCamera.y -= 0.9;
-      const amount = this.scare.kind === "mimic" ? Math.sin(Math.PI * progress) : 1 - Math.pow(1 - progress, 3);
-      actor.position.lerpVectors(this.scare.actorStart, nearCamera, amount);
-      if (!this.reducedMotion) {
-        const shake = (1 - progress) * (this.scare.kind === "mimic" ? 0.06 : 0.035);
-        this.camera.position.x = this.scare.cameraStart.x + Math.sin(now * 0.055) * shake;
-        this.camera.position.y = this.scare.cameraStart.y + Math.cos(now * 0.071) * shake;
-      }
-      if (progress >= 1) {
-        if (this.scare.kind === "mimic") actor.position.copy(this.scare.actorStart);
-        this.scare = null; delete this.canvas.dataset.scare; this.onScareChange?.(null);
-      }
+      const progress = Math.min(1, (now - this.scare.started) / SCARE_DURATION_MS);
+      if (progress >= 1) this.finishScare();
     }
     const danger = this.currentState?.danger || 0;
     this.lamp.intensity = this.currentState?.powerOn ? 12 + danger * 0.7 + Math.sin(now * 0.018) * (danger > 5 ? 2.2 : 0.35) : 0;
-    this.controls.update();
+    if (!this.scare) this.controls.update();
     for (const station of STATIONS) {
       const node = this.anchors.get(station.code); if (!node) continue;
       this.projected.set(station.position[0], 0.35, station.position[2]).project(this.camera);
@@ -373,6 +401,7 @@ export class RoomRenderer {
   }
   dispose() {
     this.disposed = true; cancelAnimationFrame(this.raf); this.resizeObserver.disconnect();
+    document.removeEventListener("visibilitychange", this.onVisibility);
     this.path = []; this.scare = null; this.onTravelChange?.(false); this.onScareChange?.(null);
     // React StrictMode reuses this canvas immediately; losing its context breaks the next renderer.
     this.canvas.removeEventListener("keydown", this.onKey); this.controls.dispose(); this.disposeObject(this.scene); this.draco.dispose(); this.renderer.dispose();

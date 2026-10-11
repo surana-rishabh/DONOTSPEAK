@@ -58,9 +58,9 @@ const TARGETS: Array<[WorldSnapshot["callerPosition"], string, string[]]> = [
   ["lamp", "red_lamp", ["lamp", "beacon", ...CONCEPT_ALIASES.light]]
 ];
 
-export type Instruction = { kind: TurnResolution["action"]["kind"]; targetId: string | null; route: WorldSnapshot["callerPosition"] | null; operation: "release" | "seal" | "activate" | "deactivate" | null; confirm: boolean; verdict: "trust" | "contain" | null; negated: boolean };
+export type Instruction = { kind: TurnResolution["action"]["kind"]; targetId: string | null; route: WorldSnapshot["callerPosition"] | null; operation: "release" | "seal" | "activate" | "deactivate" | null; confirm: boolean; verdict: "trust" | "contain" | null; negated: boolean; stay: boolean };
 export function parseInstruction(text: string, state: WorldSnapshot): Instruction {
-  const negated = hasPhrase(text, ["don't", "do not", "never", "मत", "नहीं", "mat", "nahi"]);
+  const negated = hasPhrase(text, ["don't", "do not", "never", "not", "no", "stop", "मत", "नहीं", "mat", "nahi", "nahin"]);
   const target = TARGETS.find(([, , aliases]) => aliases.some((alias) => hasPhrase(text, [alias]) && (alias !== "to a" || words(text).at(-1) === "a")));
   const move = hasPhrase(text, ["go", "move", "walk", "head", "reach", "toward", "towards", "चलो", "जाओ", "जाना", "चल", "chalo", "jao", "चलें", "पहुंचो", "आगे बढ़ो"]);
   const inspect = hasPhrase(text, ["inspect", "check", "scan", "compare", "test", "जांच", "जाँच", "जांचो", "जाँचो", "जांच करो", "परखो", "jaanch", "janch"]);
@@ -69,17 +69,29 @@ export function parseInstruction(text: string, state: WorldSnapshot): Instructio
   else if (hasPhrase(text, ["release", "unseal", "unlock", "open", "हटाओ", "हटा", "छोड़ो", "kholo", "khol", "खोल", "खोलो", "hatao"])) operation = "release";
   if (hasPhrase(text, ["turn off", "power off", "deactivate", "बिजली बंद", "bijli band"])) operation = "deactivate";
   else if (hasPhrase(text, ["activate", "restore", "turn on", "power on", "चालू", "बहाल", "chalu", "bahal"])) operation = "activate";
-  const confirm = hasPhrase(text, ["proceed", "continue", "verify", "confirm", "go ahead", "carry on", "keep going", "let's go", "lets go", "move forward", "all set", "आगे", "पुष्टि", "आगे बढ़ो", "आगे चलो", "जारी रखो", "बढ़ो", "aage", "pushti", "badho", "jaari rakho"]);
+  const confirm = hasPhrase(text, ["proceed", "continue", "verify", "confirm", "go ahead", "carry on", "keep going", "let's go", "lets go", "move forward", "all set", "you can leave", "you're good to go", "you are good to go", "make your way out", "next step", "आगे", "पुष्टि", "आगे बढ़ो", "आगे चलो", "जारी रखो", "बढ़ो", "अब निकलो", "aage", "pushti", "badho", "jaari rakho", "ab niklo"]);
   const verdict = hasPhrase(text, ["contain", "isolate", "रोकें", "रोको", "अलग", "roko", "alag"]) ? "contain"
     : hasPhrase(text, ["trust", "human", "भरोसा", "इंसान", "bharosa", "insaan"]) ? "trust" : null;
   return { kind: negated ? "refuse" : inspect ? "inspect" : operation ? "interact" : move && target ? "move" : "wait",
     targetId: target?.[1] ?? (operation ? ["door", "threshold", "exit"].includes(state.callerPosition) ? "red_door" : state.callerPosition === "utility" ? "utility" : null : null),
     route: move && target && !negated ? target[0] : null, operation: negated ? null : operation,
-    confirm: !negated && confirm, verdict: negated ? null : verdict, negated };
+    confirm: !negated && confirm, verdict: negated ? null : verdict, negated,
+    stay: !negated && hasPhrase(text, ["wait", "stay", "hold position", "remain there", "रुको", "रुकें", "ruko", "वहीं रहो", "wahi raho"]) };
 }
 
-export function localTurn(state: WorldSnapshot, transcript: string): TurnResolution {
-  const input = parseInstruction(transcript, state);
+export function resolveInstruction(text: string, state: WorldSnapshot, intent?: TurnResolution["semanticIntent"]): Instruction {
+  const local = parseInstruction(text, state);
+  if (!intent || intent.confidence < 0.4 || local.negated || local.kind !== "wait" || local.confirm || local.verdict || local.stay) return local;
+  const targetId = intent.target === "door" ? "red_door" : intent.target === "center" ? "desk" : intent.target === "lamp" ? "red_lamp" : intent.target === "none" ? null : intent.target;
+  if (targetId && !state.visibleEntityIds.includes(targetId)) return local;
+  return { kind: intent.kind, targetId: targetId ?? (intent.kind === "interact" ? ["door", "threshold", "exit"].includes(state.callerPosition) ? "red_door" : state.callerPosition === "utility" ? "utility" : null : null),
+    route: intent.kind === "move" && intent.target !== "none" ? intent.target : null,
+    operation: intent.kind === "interact" && intent.operation !== "none" ? intent.operation : null,
+    confirm: intent.kind === "wait" && intent.confirm, verdict: intent.kind === "wait" && intent.verdict !== "none" ? intent.verdict : null,
+    stay: intent.kind === "wait" && intent.stay, negated: intent.kind === "refuse" };
+}
+
+export function localTurn(state: WorldSnapshot, transcript: string, input = parseInstruction(transcript, state)): TurnResolution {
   const mutations: Mutation[] = [];
   if (input.route) mutations.push({ kind: "move_actor", targetId: "caller", value: input.route });
   const atDoor = ["door", "threshold", "exit"].includes(state.callerPosition);
@@ -100,6 +112,13 @@ export function localTurn(state: WorldSnapshot, transcript: string): TurnResolut
 }
 
 export function guardTurn(result: TurnResolution, state: WorldSnapshot, transcript: string): TurnResolution {
+  if (result.semanticIntent) {
+    const instruction = resolveInstruction(transcript, state, result.semanticIntent);
+    const safe = localTurn(state, transcript, instruction);
+    const accepted = result.semanticIntent.confidence >= 0.4 && !instruction.negated;
+    return { ...safe, semanticIntent: accepted ? result.semanticIntent : undefined,
+      response: accepted && (instruction.kind === "wait" || instruction.kind === "inspect" || safe.mutations.length) ? result.response : safe.response };
+  }
   const parsed = parseInstruction(transcript, state);
   const local = localTurn(state, transcript);
   const places = new Set(Object.keys(STATION_POSITIONS));

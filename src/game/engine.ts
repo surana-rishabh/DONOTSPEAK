@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { LearnedConceptSchema, type CallBlueprint, type LearnedConcept, type Outcome, type TurnResolution, type WorldSnapshot } from "../../shared/contracts.js";
-import { CONCEPT_POWERS, extractConcepts, guardTurn, localTurn, parseInstruction, STATION_POSITIONS, type Language } from "../../shared/rules.js";
+import { CONCEPT_POWERS, extractConcepts, guardTurn, localTurn, resolveInstruction, STATION_POSITIONS, type Language } from "../../shared/rules.js";
 import { ENTITY_IDS, FALLBACK_CALLS, GOLDEN_CALL } from "./catalog.js";
 export { extractConcepts } from "../../shared/rules.js";
 
@@ -67,7 +67,7 @@ export const fallbackResolution = (state: GameState, transcript: string) => loca
 export function applyResolution(state: GameState, raw: TurnResolution, degraded = false): GameState {
   if (state.phase === "ended" || state.phase === "onboarding" || state.phase === "briefing") return state;
   const result = guardTurn(raw, snapshot(state), state.lastTranscript);
-  const instruction = parseInstruction(state.lastTranscript, snapshot(state));
+  const instruction = resolveInstruction(state.lastTranscript, snapshot(state), result.semanticIntent);
   let next = { ...state, phase: "active" as GamePhase, degraded, interpretation: result.interpretation, caption: result.response.text };
   for (const mutation of result.mutations) {
     if (mutation.kind === "move_actor" && mutation.targetId === "caller" && typeof mutation.value === "string" && mutation.value in STATION_POSITIONS) {
@@ -98,7 +98,7 @@ export function applyResolution(state: GameState, raw: TurnResolution, degraded 
     if (state.steps.includes("act") && next.callerPosition === "utility" && next.powerOn && instruction.kind === "wait" && instruction.confirm) steps.add("confirm");
   } else if (objective === "identify_caller") {
     if (next.callerPosition === "observation") steps.add("reach");
-    if (next.callerPosition === "observation" && instruction.kind === "inspect") {
+    if (next.callerPosition === "observation" && instruction.kind === "inspect" && (!instruction.targetId || instruction.targetId === "observation")) {
       steps.add("act"); next.signalChecked = true;
       next.caption = state.callIndex % 2 === 0
         ? hi ? "सिग्नल आपकी पिछली बात हूबहू दोहरा रहा है। साँस की कोई आवाज़ नहीं है।" : "The signal repeats your last sentence exactly. There is no breathing."
@@ -110,7 +110,7 @@ export function applyResolution(state: GameState, raw: TurnResolution, degraded 
     }
   } else {
     if (next.callerPosition === "stairwell") steps.add("reach");
-    if (next.callerPosition === "stairwell" && instruction.kind === "wait" && /^(wait|stay|रुको|रुकें|ruko)/iu.test(state.lastTranscript.trim())) {
+    if (next.callerPosition === "stairwell" && instruction.kind === "wait" && instruction.stay) {
       steps.add("act"); next.mimicVisible = true; next.mimicPosition = "stairwell";
       next.caption = hi ? "वह निशान के भीतर आ गया। अब क्षेत्र सील करें।" : "It followed me inside the marker. Seal the area now.";
     }

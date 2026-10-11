@@ -1,5 +1,6 @@
 export type RoomPoint = readonly [number, number, number];
 export type ScareKind = "mimic" | "caller";
+export const SCARE_DURATION_MS = 1800;
 export type ScareState = { phase: string; mimicVisible: boolean };
 
 export function buildSafeRoute(from: RoomPoint, to: RoomPoint): RoomPoint[] {

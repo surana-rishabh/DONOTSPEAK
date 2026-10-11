@@ -30,13 +30,13 @@ npm run dev
 
 Open http://localhost:5173. Production: `npm run build`, then `npm start` at http://localhost:8080.
 
-Add GEMINI_API_KEY and ELEVENLABS_API_KEY for live services. Without them, all objectives remain playable with typed commands and shared local rules. Click **Enable microphone**, grant permission, and hold the button or V. Release sends one recording; capture stops after 15 seconds. Use localhost or HTTPS.
+Add GEMINI_API_KEY and ELEVENLABS_API_KEY for live services. Without them, all objectives remain playable with typed commands and shared local rules. Click **Enable microphone**, grant permission, and speak naturally. About 900 ms of silence submits each spoken sentence; the microphone automatically resumes and stays enabled until toggled off (button or V). Capture temporarily pauses during caller playback, movement, processing, and hidden tabs to prevent echo and overlapping commands. Turning it off discards an unfinished recording and stops the input tracks. Each recording is capped at 15 seconds; silence alone is never sent. Use localhost or HTTPS.
 
 ## AI and voice
 
-- Gemma 4 receives a small game screenshot, transcript, language, and bounded state. It proposes one intent. Shared rules validate target, proximity, dangerous words, and completion.
-- One MediaRecorder path sends each held utterance to Scribe v2 through the server. Optional browser recognition supplies interim text and one fallback; it never independently submits duplicate turns.
-- ElevenLabs metadata must identify the selected output as female. Default selection finds an available female voice; a configured male voice is not accepted. Flash v2.5 supports English/Hindi. On outage, a supported female browser voice or captions are used.
+- Gemma 4 receives a small game screenshot, transcript, language, and bounded state. It proposes one semantic intent, including confirmation, inspection, staying, and verdicts. Unrecognized paraphrases can proceed at model confidence >= 0.40; that self-estimate is not a calibrated percentage of sentence similarity. Shared rules still enforce negation, visible targets, proximity, separate steps, dangerous words, and completion. Without Gemma, explicit English/Hindi/Hinglish aliases remain available.
+- One MediaRecorder path sends each spoken utterance to Scribe v2 through the server. Local waveform energy detects the end of a sentence. Optional browser recognition supplies interim text and one fallback; it never independently submits duplicate turns. Device/noise calibration remains necessary for production.
+- ElevenLabs metadata must identify the selected output as female. Default selection finds an available female voice; a configured male voice is not accepted. Flash v2.5 supports English/Hindi. On outage, captions are used; no default browser output voices. A quiet synthesized suspense pad sits below dialogue and ducks during speech/listening.
 - Keys stay on the server. Recordings/transcripts are not persisted server-side. Provider-side policies still apply.
 
 | Variable | Purpose |
@@ -76,6 +76,10 @@ Browser QA requires Chrome at the path in the scripts. qa:visual tests a running
 See [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), [demo](docs/DEMO_SCRIPT.md), and [world compiler skill](skills/do-not-say-world-compiler/SKILL.md).
 
 ## Deployment and license
+
+For Vercel, import the repository with the Vite preset; `vercel.json` serves the static build and routes `/api/*` to the Express function. Set `GEMINI_API_KEY` and `ELEVENLABS_API_KEY` as server environment variables (never `VITE_*`), plus the voice IDs from `.env.example` for your chosen character voices. Redeploy after changing environment variables. No separate API host is required. This configuration has local checks, not a verified Vercel deployment.
+
+Phone rendering caps pixel ratio at 1 and disables dynamic shadow maps/antialiasing. The opening portrait only tracks a fine mouse pointer and honors reduced motion; hidden tabs stop scene rendering. Existing model files are unchanged. Large model downloads still depend on the connection, and the API rate limiter is per function instance; add shared quota controls before an unrestricted public launch.
 
 DigitalOcean manifest included; local verification is not deployment. Configure encrypted runtime keys. Public deployment needs authentication/provider quota controls and verified asset licenses. Apache-2.0 covers repository code; Gemma weights/services have separate terms. Generated audio is not committed.
 

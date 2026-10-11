@@ -39,4 +39,7 @@ test("suspense mix rises with danger and ducks under dialogue", () => {
   assert.ok(danger.impactRate > calm.impactRate);
   assert.ok(ducked.drone < danger.drone);
   assert.ok(ducked.pulse < danger.pulse);
+  assert.ok(calm.music > 0 && calm.music < 0.04);
+  assert.ok(ducked.music < danger.music);
+  assert.ok(ducked.impactRate < danger.impactRate);
 });

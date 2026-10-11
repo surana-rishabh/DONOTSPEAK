@@ -1,6 +1,7 @@
 import { describeMicrophoneAccessError, diagnoseMicrophoneEnvironment } from "./pushToTalk";
 import type { Language } from "../../shared/rules";
 import { mixForTension, type AudioPhase, type SuspenseMix } from "./audioDesign";
+import { sampleSpeech } from "./speechActivity";
 export type VoiceCallbacks = { onPartial: (text: string) => void; onCommit: (text: string) => void; onStatus: (status: "connecting" | "live" | "muted" | "transcribing" | "offline", detail?: string) => void };
 type RecognitionResult = { resultIndex: number; results: ArrayLike<{ isFinal: boolean; [index: number]: { transcript: string } }> };
 type BrowserRecognition = { lang: string; continuous: boolean; interimResults: boolean; onresult: ((event: RecognitionResult) => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void; abort: () => void };
@@ -17,6 +18,10 @@ export class VoiceChannel {
   private recognition: BrowserRecognition | null = null;
   private generation = 0;
   private recordingTimer = 0;
+  private listening = false;
+  private activityTimer = 0;
+  private microphoneSource: MediaStreamAudioSourceNode | null = null;
+  private analyser: AnalyserNode | null = null;
   private language: Language = "en";
   private browserText = "";
   private recording = false;
@@ -34,11 +39,23 @@ export class VoiceChannel {
     const environment = diagnoseMicrophoneEnvironment({ isSecureContext: window.isSecureContext, hasGetUserMedia: Boolean(navigator.mediaDevices?.getUserMedia), hostname: location.hostname });
     if (environment) throw new Error(environment);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }, video: false });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }, video: false });
       if (generation !== this.generation) { stream.getTracks().forEach((t) => t.stop()); return; }
       if (!stream.getAudioTracks().length || !window.MediaRecorder) { stream.getTracks().forEach((t) => t.stop()); throw new Error("Microphone recording is unavailable in this browser."); }
-      this.stream = stream; this.mute(); callbacks.onStatus("muted", "Hold the button or V to speak. Release to send.");
-    } catch (error) { throw new Error(describeMicrophoneAccessError(error instanceof DOMException ? error : { message: String(error) })); }
+      this.stream = stream;
+      await this.unlock();
+      if (generation !== this.generation) { stream.getTracks().forEach((t) => t.stop()); return; }
+      this.microphoneSource = this.context!.createMediaStreamSource(stream);
+      this.analyser = this.context!.createAnalyser(); this.analyser.fftSize = 1024;
+      this.microphoneSource.connect(this.analyser);
+      stream.getAudioTracks().forEach(track => { track.onended = () => { if (generation !== this.generation) return; this.closeInput(); callbacks.onStatus("offline", "Microphone disconnected. Enable it again to retry."); }; });
+      this.mute(); callbacks.onStatus("muted", "Microphone ready. Speak naturally; pause to send.");
+    } catch (error) { if (generation === this.generation) this.closeInput(); throw new Error(describeMicrophoneAccessError(error instanceof DOMException ? error : { message: String(error) })); }
+  }
+  setListening(enabled: boolean) {
+    this.listening = enabled;
+    if (enabled) this.unmute();
+    else if (!this.recorder || this.recorder.state === "recording") this.mute();
   }
   unmute() {
     if (!this.isConnected || !this.stream) throw new Error("Enable the microphone first.");
@@ -54,8 +71,10 @@ export class VoiceChannel {
       if (generation !== this.generation) return;
       this.recorder = null;
       if (this.recording) void this.transcribe(new Blob(chunks, { type: recorder.mimeType }), generation);
+      else if (this.listening) this.unmute();
     };
     recorder.start();
+    const activity = { voicedMs: 0, lastVoice: performance.now(), lastSample: performance.now() };
     const BrowserSpeech = (window as unknown as { SpeechRecognition?: new () => BrowserRecognition; webkitSpeechRecognition?: new () => BrowserRecognition }).SpeechRecognition
       || (window as unknown as { webkitSpeechRecognition?: new () => BrowserRecognition }).webkitSpeechRecognition;
     if (BrowserSpeech) {
@@ -63,21 +82,32 @@ export class VoiceChannel {
       recognition.lang = this.language === "hi" ? "hi-IN" : "en-IN"; recognition.continuous = true; recognition.interimResults = true;
       let finalText = "";
       recognition.onresult = (event) => {
-        if (generation !== this.generation || !this.recording) return;
+        if (generation !== this.generation || !this.recording || this.recognition !== recognition) return;
         let partial = "";
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const result = event.results[i]; if (result.isFinal) finalText += `${result[0].transcript} `; else partial += result[0].transcript;
         }
         this.browserText = `${finalText}${partial}`.trim(); this.callbacks?.onPartial(this.browserText);
+        if (this.browserText) { activity.voicedMs = Math.max(180, activity.voicedMs); activity.lastVoice = performance.now(); }
       };
       recognition.onerror = () => undefined;
       try { recognition.start(); } catch { /* Recorded Scribe path still works. */ }
     }
-    this.callbacks?.onStatus("live", this.language === "hi" ? "सुन रही हूँ… छोड़ने पर भेजें।" : "Listening… release to send.");
-    this.recordingTimer = window.setTimeout(() => this.finishUtterance(), 15000);
+    this.callbacks?.onStatus("live", this.language === "hi" ? "सुन रही हूँ… थोड़ी देर रुकने पर भेजूँगी।" : "Listening… pause briefly to send.");
+    const samples = new Float32Array(this.analyser!.fftSize);
+    this.activityTimer = window.setInterval(() => {
+      this.analyser?.getFloatTimeDomainData(samples);
+      let energy = 0; for (const value of samples) energy += value * value;
+      if (sampleSpeech(activity, Math.sqrt(energy / samples.length), performance.now())) this.finishUtterance();
+    }, 60);
+    this.recordingTimer = window.setTimeout(() => {
+      if (activity.voicedMs >= 180 || this.browserText.trim()) this.finishUtterance();
+      else { this.mute(); this.callbacks?.onStatus("muted", "Listening for your next instruction…"); }
+    }, 15000);
   }
   finishUtterance() {
     window.clearTimeout(this.recordingTimer);
+    window.clearInterval(this.activityTimer);
     if (!this.recorder || this.recorder.state !== "recording") return "realtime" as const;
     this.recognition?.stop(); this.recorder.stop();
     this.stream?.getAudioTracks().forEach((t) => { t.enabled = false; });
@@ -85,6 +115,7 @@ export class VoiceChannel {
     return "recording" as const;
   }
   mute() {
+    window.clearInterval(this.activityTimer);
     window.clearTimeout(this.recordingTimer); this.recording = false;
     this.recognition?.abort(); this.recognition = null;
     if (this.recorder?.state === "recording") this.recorder.stop();
@@ -93,9 +124,9 @@ export class VoiceChannel {
   private async transcribe(audio: Blob, generation: number) {
     this.recording = false;
     const controller = new AbortController(); this.transcriptAbort = controller;
-    let detail = "Ready. Hold V or the button to speak.";
+    let detail = "Ready for your next instruction.";
     try {
-      if (audio.size < 300) throw new Error("No speech captured. Hold to speak for a little longer.");
+      if (audio.size < 300) throw new Error("No speech captured. Speak a little longer, or type your instruction.");
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",")[1]); reader.onerror = reject; reader.readAsDataURL(audio);
       });
@@ -116,7 +147,9 @@ export class VoiceChannel {
     }
   }
   private closeInput() {
+    this.listening = false;
     this.generation++; this.mute(); this.transcriptAbort?.abort(); this.transcriptAbort = null;
+    this.microphoneSource?.disconnect(); this.analyser?.disconnect(); this.microphoneSource = null; this.analyser = null;
     this.recorder = null; this.stream?.getTracks().forEach((t) => t.stop()); this.stream = null;
   }
   stopSpeech() {
@@ -125,6 +158,7 @@ export class VoiceChannel {
     this.activeSource = null; this.activeGain = null; window.speechSynthesis?.cancel();
   }
   close() { this.closeInput(); this.stopSpeech(); }
+  disconnectMicrophone() { this.closeInput(); }
   setVolume(volume: number) {
     this.volume = Math.max(0, Math.min(1, volume));
     if (this.activeGain && this.context) this.activeGain.gain.setTargetAtTime(this.volume, this.context.currentTime, 0.04);
@@ -154,7 +188,7 @@ export class VoiceChannel {
 export class AmbientDirector {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
-  private layers: Array<{ gain: GainNode; key: keyof Pick<SuspenseMix, "drone" | "buzz" | "pulse" | "noise"> }> = [];
+  private layers: Array<{ gain: GainNode; key: keyof Pick<SuspenseMix, "drone" | "buzz" | "pulse" | "noise" | "music"> }> = [];
   private sources: AudioScheduledSourceNode[] = [];
   private volume = 0.3;
   private impactRate = 0;
@@ -165,9 +199,9 @@ export class AmbientDirector {
     this.volume = volume;
     if (this.context) { await this.context.resume(); return; }
     const context = new AudioContext(); const master = context.createGain();
-    master.gain.value = volume * 0.34; master.connect(context.destination);
+    master.gain.value = volume * 0.24; master.connect(context.destination);
     this.context = context; this.master = master;
-    const oscillator = (type: OscillatorType, frequency: number, key: "drone" | "buzz" | "pulse", filterType: BiquadFilterType, filterFrequency: number) => {
+    const oscillator = (type: OscillatorType, frequency: number, key: "drone" | "buzz" | "pulse" | "music", filterType: BiquadFilterType, filterFrequency: number) => {
       const source = context.createOscillator(); const filter = context.createBiquadFilter(); const gain = context.createGain();
       source.type = type; source.frequency.value = frequency; filter.type = filterType; filter.frequency.value = filterFrequency; filter.Q.value = 1.4; gain.gain.value = 0;
       source.connect(filter).connect(gain).connect(master); source.start(); this.sources.push(source); this.layers.push({ gain, key });
@@ -175,6 +209,7 @@ export class AmbientDirector {
     oscillator("sine", 43, "drone", "lowpass", 150);
     oscillator("sawtooth", 118, "buzz", "bandpass", 220);
     oscillator("sine", 31, "pulse", "lowpass", 90);
+    for (const frequency of [73.42, 110, 155.56]) oscillator("sine", frequency, "music", "lowpass", 320);
     const buffer = context.createBuffer(1, context.sampleRate * 2, context.sampleRate); const data = buffer.getChannelData(0);
     for (let index = 0; index < data.length; index++) data[index] = Math.random() * 2 - 1;
     const noise = context.createBufferSource(); const noiseFilter = context.createBiquadFilter(); const noiseGain = context.createGain();
@@ -186,7 +221,7 @@ export class AmbientDirector {
   }
   setVolume(volume: number) {
     this.volume = volume;
-    if (this.master && this.context) this.master.gain.setTargetAtTime(volume * 0.34, this.context.currentTime, 0.12);
+    if (this.master && this.context) this.master.gain.setTargetAtTime(volume * 0.24, this.context.currentTime, 0.12);
   }
   setTension(danger: number, mimicVisible: boolean, phase: AudioPhase, ducked: boolean) {
     this.lastState = [danger, mimicVisible, phase, ducked];

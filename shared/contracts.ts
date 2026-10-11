@@ -39,6 +39,15 @@ export const MutationSchema = z.object({
 export const TurnResolutionSchema = z.object({
   version: z.literal("1.0"),
   interpretation: z.string().min(1).max(180),
+  semanticIntent: z.object({
+    kind: ActionKindSchema,
+    target: z.enum(["door", "utility", "observation", "stairwell", "center", "mirror", "vent", "lamp", "none"]),
+    operation: z.enum(["release", "seal", "activate", "deactivate", "none"]),
+    confirm: z.boolean(),
+    verdict: z.enum(["trust", "contain", "none"]),
+    stay: z.boolean(),
+    confidence: z.number().finite().min(0).max(1)
+  }).optional(),
   action: z.object({
     kind: ActionKindSchema,
     targetId: z.string().regex(/^[a-z0-9_]+$/).max(32).nullable()

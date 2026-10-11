@@ -7,6 +7,9 @@ import { enforceTurn, fallbackWorldTurn } from "./worldCompiler.js";
 import { FALLBACK_CALLS } from "../src/game/catalog.js";
 
 const initial = () => beginCall(startGoldenCall(createInitialState(), "NIGHTJAR"));
+function semantic(state: GameState, text: string, changes: Partial<NonNullable<TurnResolution["semanticIntent"]>>) {
+  return { ...localTurn(snapshot(state), text), semanticIntent: { kind: "wait" as const, target: "none" as const, operation: "none" as const, confirm: false, verdict: "none" as const, stay: false, confidence: 0.4, ...changes } };
+}
 function turn(state: GameState, text: string, model?: TurnResolution) {
   const pending = markResolving(state, text);
   return applyResolution(pending, model || fallbackResolution(pending, text), true);
@@ -18,6 +21,47 @@ test("equivalent confirmation phrases complete only a prepared objective", () =>
     assert.equal(turn(ready, phrase).outcome, "escaped", phrase);
     assert.equal(turn(ready, `do not ${phrase}`).outcome, null, phrase);
   }
+});
+
+test("semantic paraphrases at 0.40 work but cannot skip, negate, combine or invent steps", () => {
+  const ready = turn(turn(initial(), "Go to A"), "Release the barrier");
+  for (const text of ["the path is yours now", "बस अब अपना रास्ता पकड़ लो", "ab tum nikal sakte ho"]) {
+    assert.equal(turn(ready, text, semantic(ready, text, { confirm: true })).outcome, "escaped");
+    assert.equal(turn(initial(), text, semantic(initial(), text, { confirm: true })).outcome, null);
+    assert.equal(turn(ready, text, semantic(ready, text, { confirm: true, confidence: 0.39 })).outcome, null);
+    assert.equal(turn(ready, `do not ${text}`, semantic(ready, text, { confirm: true })).outcome, null);
+  }
+  const text = "take a stroll toward the humming thing";
+  const moved = turn(initial(), text, semantic(initial(), text, { kind: "move", target: "utility", confirm: true }));
+  assert.equal(moved.callerPosition, "utility"); assert.equal(moved.outcome, null); assert.equal(moved.danger, 0);
+  const opened = turn(initial(), "remove the obstruction", semantic(initial(), "remove the obstruction", { kind: "interact", target: "door", operation: "release" }));
+  assert.equal(opened.doorsOpen, false);
+  assert.equal(turn(ready, "not yet", semantic(ready, "not yet", { confirm: true })).outcome, null);
+});
+
+test("semantic inspection and verdict still require separate prepared turns", () => {
+  let state = beginCall(startGeneratedCall({ ...initial(), callIndex: 1 }, FALLBACK_CALLS[1]));
+  state = turn(state, "Go to C");
+  assert.equal(turn(state, "it is an impostor", semantic(state, "it is an impostor", { verdict: "contain" })).outcome, null);
+  state = turn(state, "examine the transmission", semantic(state, "examine the transmission", { kind: "inspect", target: "observation", verdict: "contain" }));
+  assert.equal(state.signalChecked, true); assert.equal(state.outcome, null);
+  state = turn(state, "keep that creature isolated", semantic(state, "keep that creature isolated", { verdict: "contain" }));
+  assert.equal(state.outcome, "escaped");
+});
+
+test("semantic power and containment paraphrases retain proximity and preparation", () => {
+  let power = beginCall(startGeneratedCall(initial(), FALLBACK_CALLS[0]));
+  power = turn(power, "take me to the humming unit", semantic(power, "take me to the humming unit", { kind: "move", target: "utility" }));
+  power = turn(power, "get this thing working", semantic(power, "get this thing working", { kind: "interact", target: "utility", operation: "activate" }));
+  assert.equal(power.powerOn, true); assert.equal(power.outcome, null);
+  power = turn(power, "that's the job finished", semantic(power, "that's the job finished", { confirm: true }));
+  assert.equal(power.outcome, "escaped");
+  let trap = beginCall(startGeneratedCall(initial(), FALLBACK_CALLS[2]));
+  trap = turn(trap, "Go to D");
+  trap = turn(trap, "remain completely still", semantic(trap, "remain completely still", { stay: true }));
+  assert.equal(trap.mimicPosition, "stairwell"); assert.equal(trap.outcome, null);
+  trap = turn(trap, "secure this place", semantic(trap, "secure this place", { kind: "interact", target: "door", operation: "seal" }));
+  assert.equal(trap.outcome, "escaped");
 });
 test("all concept aliases agree across frontend and server, without substring matches", () => {
   for (const [concept, aliases] of Object.entries(CONCEPT_ALIASES)) for (const alias of aliases) {

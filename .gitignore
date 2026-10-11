@@ -9,3 +9,4 @@ coverage/
 quest-game/
 outputs/.playwright-profile/
 .superpowers/
+.vercel/

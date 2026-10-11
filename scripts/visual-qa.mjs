@@ -24,6 +24,8 @@ try {
   page.on("response", (response) => { if (response.url().includes("/api/turns/resolve")) void response.json().then((data) => events.push({ source: data.source, durationMs: data.durationMs })); });
   await page.goto(base, { waitUntil: "networkidle" });
   await page.screenshot({ path: `${output}/game-intro.png`, fullPage: true });
+  assert.equal(await page.getByRole("button", { name: /clock in/i }).isDisabled(), true);
+  await page.locator("#codename").fill("NIGHTJAR");
   await page.getByRole("button", { name: /clock in/i }).click(); await page.getByRole("button", { name: /answer call/i }).click();
   await page.waitForFunction(() => document.querySelector("canvas")?.dataset.modelsReady === "true", null, { timeout: 20000 });
   assert.equal(await page.locator("canvas").getAttribute("data-models-error"), null);
@@ -66,6 +68,7 @@ try {
   checks.push("Mimic reveal and caller ending scares");
   await page.getByRole("button", { name: "New shift", exact: true }).click();
   await page.getByLabel("Language", { exact: true }).selectOption("hi");
+  await page.locator("#codename").fill("निशा");
   await page.getByRole("button", { name: /खेल शुरू करें/ }).click(); await page.getByRole("button", { name: /कॉल उठाएँ/ }).click();
   await openSettings();
   await page.getByLabel("कम गति", { exact: true }).check();
@@ -73,6 +76,7 @@ try {
   for (const text of ["लाल निशान तक जाओ", "रुकावट हटाओ", "आगे"]) await send(text);
   assert.match(await page.locator(".ending-panel").innerText(), /सिग्नल सुरक्षित/); checks.push("Hindi escape + keyword gate");
   await page.getByRole("button", { name: "नई शिफ्ट", exact: true }).click(); await page.getByLabel("भाषा", { exact: true }).selectOption("en");
+  await page.locator("#codename").fill("NIGHTJAR");
   await page.getByRole("button", { name: /clock in/i }).click(); await page.getByRole("button", { name: /answer call/i }).click();
   await page.locator("canvas").waitFor(); await page.waitForFunction(() => document.querySelector("canvas")?.dataset.modelsReady === "true");
   await openSettings();
@@ -114,12 +118,17 @@ try {
     return route.fulfill({ status: 200, contentType: "application/json", body: '{"text":"Go to B"}' });
   });
   await page.getByRole("button", { name: "Enable microphone", exact: true }).click();
-  await page.getByRole("button", { name: "Hold to speak / V", exact: true }).waitFor();
-  const talkBox = await page.getByRole("button", { name: "Hold to speak / V", exact: true }).boundingBox();
-  await page.mouse.move(talkBox.x + talkBox.width / 2, talkBox.y + talkBox.height / 2); await page.mouse.down(); await page.waitForTimeout(1000); await page.mouse.up();
+  await page.getByRole("button", { name: "Turn microphone off / V", exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector(".mic-status")?.textContent === "Listening");
+  await page.evaluate(() => {
+    window.visualVoiceEnergy = 0.07;
+    AnalyserNode.prototype.getFloatTimeDomainData = function(samples) { samples.fill(window.visualVoiceEnergy); };
+  });
+  await page.waitForTimeout(600);
+  await page.evaluate(() => { window.visualVoiceEnergy = 0; });
   await page.waitForFunction(() => document.querySelector(".transcript-line")?.textContent === "Go to B", null, { timeout: 20000 });
   assert.equal(recordings, 1); checks.push("Simulated microphone capture submits once, recorded STT response drives game");
-  await page.getByRole("button", { name: "Disconnect mic", exact: true }).click();
+  await page.getByRole("button", { name: "Turn microphone off / V", exact: true }).click();
   assert.equal(await page.getByRole("button", { name: "Enable microphone", exact: true }).count(), 1); checks.push("Microphone disconnect");
   assert.deepEqual(errors, []); assert.ok(events.some((e) => e.source === "gemma" || e.source === "self-hosted"), "No live Gemma turns were verified");
   console.log(JSON.stringify({ ok: true, checks, events, errors }, null, 2));
