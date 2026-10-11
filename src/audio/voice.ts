@@ -186,6 +186,8 @@ export class VoiceChannel {
 }
 
 export class AmbientDirector {
+  private track: HTMLAudioElement | null = null;
+  private trackGain: GainNode | null = null;
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
   private layers: Array<{ gain: GainNode; key: keyof Pick<SuspenseMix, "drone" | "buzz" | "pulse" | "noise" | "music"> }> = [];
@@ -194,7 +196,11 @@ export class AmbientDirector {
   private impactRate = 0;
   private impactTimer = 0;
   private lastState: [number, boolean, AudioPhase, boolean] = [0, false, "onboarding", false];
-  private visibility = () => { if (!this.context) return; void (document.hidden ? this.context.suspend() : this.context.resume()); };
+  private visibility = () => {
+    if (!this.context) return;
+    if (document.hidden) { this.track?.pause(); void this.context.suspend(); }
+    else { void this.context.resume(); this.setTension(...this.lastState); }
+  };
   async start(volume = 0.3) {
     this.volume = volume;
     if (this.context) { await this.context.resume(); return; }
@@ -209,7 +215,11 @@ export class AmbientDirector {
     oscillator("sine", 43, "drone", "lowpass", 150);
     oscillator("sawtooth", 118, "buzz", "bandpass", 220);
     oscillator("sine", 31, "pulse", "lowpass", 90);
-    for (const frequency of [73.42, 110, 155.56]) oscillator("sine", frequency, "music", "lowpass", 320);
+    const track = new Audio("/audio/suspense-tension.mp3"); track.loop = true; track.preload = "none";
+    const trackGain = context.createGain(); trackGain.gain.value = 0;
+    context.createMediaElementSource(track).connect(trackGain).connect(master);
+    this.track = track; this.trackGain = trackGain;
+    void track.play().catch(() => undefined);
     const buffer = context.createBuffer(1, context.sampleRate * 2, context.sampleRate); const data = buffer.getChannelData(0);
     for (let index = 0; index < data.length; index++) data[index] = Math.random() * 2 - 1;
     const noise = context.createBufferSource(); const noiseFilter = context.createBiquadFilter(); const noiseGain = context.createGain();
@@ -228,6 +238,12 @@ export class AmbientDirector {
     const mix = mixForTension(danger, mimicVisible, phase, ducked); this.impactRate = mix.impactRate;
     if (!this.context) return;
     for (const layer of this.layers) layer.gain.gain.setTargetAtTime(mix[layer.key], this.context.currentTime, 0.5);
+    const inCall = phase === "active" || phase === "resolving";
+    this.trackGain?.gain.setTargetAtTime(inCall ? mix.music * 8 : 0, this.context.currentTime, 0.3);
+    if (this.track) {
+      if (inCall && this.track.paused) void this.track.play().catch(() => undefined);
+      else if (!inCall) this.track.pause();
+    }
   }
   private impact(strength: number) {
     if (!this.context || this.context.state !== "running" || !this.master || !this.volume) return;
@@ -239,6 +255,7 @@ export class AmbientDirector {
   }
   hit() { this.impact(1); }
   stop() {
+    this.track?.pause(); this.track?.removeAttribute("src"); this.track?.load(); this.track = null; this.trackGain = null;
     window.clearInterval(this.impactTimer); document.removeEventListener("visibilitychange", this.visibility);
     for (const source of this.sources) { try { source.stop(); } catch { /* Already stopped. */ } }
     this.sources = []; this.layers = []; void this.context?.close(); this.context = null; this.master = null;
