@@ -1,0 +1,53 @@
+import { chromium } from "playwright-core";
+import assert from "node:assert/strict";
+
+const base = process.env.QA_BASE_URL;
+assert.ok(base, "Set QA_BASE_URL to the deployed game");
+const healthResponse = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(20000) });
+assert.equal(healthResponse.status, 200);
+const health = await healthResponse.json(); assert.equal(health.ok, true);
+const browser = await chromium.launch({ executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true });
+try {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const errors = []; page.on("pageerror", error => errors.push(error.message));
+  await page.goto(base, { waitUntil: "networkidle" });
+  assert.equal(await page.locator("#codename").inputValue(), "");
+  assert.equal(await page.getByRole("button", { name: /clock in/i }).isDisabled(), true);
+  await page.locator("#codename").fill("HOSTED-QA");
+  await page.getByRole("button", { name: /clock in/i }).click();
+  await page.getByRole("button", { name: /answer call/i }).click();
+  await page.waitForFunction(() => document.querySelector("canvas")?.dataset.modelsReady === "true", null, { timeout: 60000 });
+  assert.equal(await page.locator("canvas").getAttribute("data-model-failures"), "0");
+  const send = async text => {
+    await page.waitForFunction(() => !document.querySelector("#command")?.disabled, null, { timeout: 45000 });
+    await page.locator("#command").fill(text); await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page.waitForFunction(() => !!document.querySelector(".ending-panel") || !document.querySelector("#command")?.disabled, null, { timeout: 45000 });
+  };
+  for (const text of ["Go to A", "Release the barrier", "Proceed"]) await send(text);
+  await page.locator(".ending-panel").waitFor();
+  assert.equal(await page.locator(".ending-panel").getAttribute("data-outcome"), "escaped");
+  assert.match(await page.locator(".ending-panel").innerText(), /HOSTED-QA/);
+  await page.screenshot({ path: "outputs/hosted-ending.png", fullPage: true });
+  await page.getByRole("button", { name: "New shift", exact: true }).click();
+  assert.equal(await page.locator("#codename").inputValue(), "");
+  await page.locator("#codename").fill("SCARE-QA");
+  await page.getByRole("button", { name: /clock in/i }).click();
+  await page.getByRole("button", { name: /answer call/i }).click();
+  await page.waitForFunction(() => !document.querySelector("#command")?.disabled);
+  await page.locator("#command").fill("door light shadow mirror voice name behind");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("canvas")?.dataset.scare === "caller", null, { timeout: 30000 });
+  assert.equal(await page.locator("canvas").getAttribute("data-scare-distance"), "0.42");
+  assert.equal(await page.locator(".feed-frame").evaluate(node => getComputedStyle(node).position), "fixed");
+  await page.screenshot({ path: "outputs/hosted-instant-scare.png" });
+  await page.waitForTimeout(500);
+  assert.match(await page.locator("canvas").evaluate(node => getComputedStyle(node).filter), /blur\(/);
+  await page.screenshot({ path: "outputs/hosted-scare-blur.png" });
+  await page.locator(".ending-panel").waitFor();
+  assert.equal(await page.locator(".ending-panel").getAttribute("data-outcome"), "caught");
+  assert.match(await page.locator(".ending-panel").innerText(), /SCARE-QA/);
+  await page.getByRole("button", { name: "New shift", exact: true }).click();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  assert.deepEqual(errors, []);
+  console.log(JSON.stringify({ ok: true, base, health, mobile: true, models: true, escapedEnding: true, instantScare: true, blurFade: true, lossEnding: true, nameReset: true, pageErrors: errors }));
+} finally { await browser.close(); }
