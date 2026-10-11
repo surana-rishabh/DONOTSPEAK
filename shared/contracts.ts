@@ -55,14 +55,17 @@ export const TurnResolutionSchema = z.object({
 });
 
 export const WorldSnapshotSchema = z.object({
+  language: z.enum(["en", "hi"]).default("en"),
+  steps: z.array(z.string().max(32)).max(8).default([]),
+  signalChecked: z.boolean().default(false),
   callId: z.string().max(48),
   callIndex: z.number().int().min(0).max(9999),
   prologueBeat: z.number().int().min(0).max(12),
   danger: z.number().int().min(0).max(10),
   microphoneMode: z.enum(["push", "live", "muted"]),
   callerPosition: z.enum(["center", "door", "lamp", "mirror", "vent", "exit", "archive", "threshold", "utility", "observation", "stairwell"]),
-  callerCoords: z.array(z.number()).max(3).optional(),
-  mimicCoords: z.array(z.number()).max(3).optional(),
+  callerCoords: z.tuple([z.number().finite().min(-8).max(8), z.number().finite().min(-1).max(5), z.number().finite().min(-8).max(8)]).optional(),
+  mimicCoords: z.tuple([z.number().finite().min(-8).max(8), z.number().finite().min(-1).max(5), z.number().finite().min(-8).max(8)]).optional(),
   doorsOpen: z.boolean(),
   powerOn: z.boolean(),
   mimicVisible: z.boolean(),
@@ -75,7 +78,7 @@ export const WorldSnapshotSchema = z.object({
 
 export const TurnRequestSchema = z.object({
   frameDataUrl: z.string().regex(/^data:image\/(?:jpeg|webp);base64,/).max(1_200_000),
-  transcript: z.string().min(1).max(240),
+  transcript: z.string().trim().min(1).max(240),
   state: WorldSnapshotSchema
 });
 

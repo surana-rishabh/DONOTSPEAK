@@ -1,4 +1,4 @@
-import type { CallBlueprint, LearnedConcept } from "../../shared/contracts.js";
+import type { CallBlueprint } from "../../shared/contracts.js";
 
 export const ENTITY_IDS = [
   "caller", "mimic", "red_door", "red_lamp", "mirror", "desk", "locker", "radio", "vent", "clock", "exit",
@@ -29,7 +29,7 @@ export const GOLDEN_CALL: CallBlueprint = {
   objective: "escape",
   dangerousConcepts: ["door", "open", "name", "voice"],
   openingLine: "Control? I woke up in Archive Nine. I cannot see the room. Tell me where to go—but choose your words carefully.",
-  operatorNotice: "SEMANTIC CONTAINMENT CALL 00. Do not supply nouns the caller does not already possess."
+  operatorNotice: "Reach A, release the barrier there, then say proceed. Indirect descriptions keep the signal safe."
 };
 
 export const FALLBACK_CALLS: CallBlueprint[] = [
