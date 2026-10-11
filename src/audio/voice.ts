@@ -1,5 +1,6 @@
 import { describeMicrophoneAccessError, diagnoseMicrophoneEnvironment } from "./pushToTalk";
 import type { Language } from "../../shared/rules";
+import { mixForTension, type AudioPhase, type SuspenseMix } from "./audioDesign";
 export type VoiceCallbacks = { onPartial: (text: string) => void; onCommit: (text: string) => void; onStatus: (status: "connecting" | "live" | "muted" | "transcribing" | "offline", detail?: string) => void };
 type RecognitionResult = { resultIndex: number; results: ArrayLike<{ isFinal: boolean; [index: number]: { transcript: string } }> };
 type BrowserRecognition = { lang: string; continuous: boolean; interimResults: boolean; onresult: ((event: RecognitionResult) => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void; abort: () => void };
@@ -10,6 +11,7 @@ export class VoiceChannel {
   private callbacks: VoiceCallbacks | null = null;
   private context: AudioContext | null = null;
   private activeSource: AudioBufferSourceNode | null = null;
+  private activeGain: GainNode | null = null;
   private speechAbort: AbortController | null = null;
   private transcriptAbort: AbortController | null = null;
   private recognition: BrowserRecognition | null = null;
@@ -19,6 +21,7 @@ export class VoiceChannel {
   private browserText = "";
   private recording = false;
   private speechSerial = 0;
+  private volume = 1;
   get isConnected() { return Boolean(this.stream?.getAudioTracks().some((track) => track.readyState === "live")); }
   async unlock() {
     this.context ??= new AudioContext();
@@ -119,45 +122,90 @@ export class VoiceChannel {
   stopSpeech() {
     this.speechSerial++; this.speechAbort?.abort(); this.speechAbort = null;
     try { this.activeSource?.stop(); } catch { /* Playback already finished. */ }
-    this.activeSource = null; window.speechSynthesis?.cancel();
+    this.activeSource = null; this.activeGain = null; window.speechSynthesis?.cancel();
   }
   close() { this.closeInput(); this.stopSpeech(); }
-  async speak(text: string, speaker: "caller" | "mimic" | "operator", volume = 1) {
-    this.stopSpeech(); if (volume <= 0) return true;
+  setVolume(volume: number) {
+    this.volume = Math.max(0, Math.min(1, volume));
+    if (this.activeGain && this.context) this.activeGain.gain.setTargetAtTime(this.volume, this.context.currentTime, 0.04);
+  }
+  async speak(text: string, speaker: "caller" | "mimic" | "operator", character: string, language: Language = this.language) {
+    this.stopSpeech(); if (this.volume <= 0) return true;
     const serial = this.speechSerial; const controller = new AbortController(); this.speechAbort = controller;
     try {
       await this.unlock();
-      const response = await fetch("/api/voice/stream", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, speaker, language: /[\u0900-\u097f]/.test(text) ? "hi" : "en" }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(16000)]) });
+      const response = await fetch("/api/voice/stream", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, speaker, character, language }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(16000)]) });
       if (!response.ok) throw new Error("Speech unavailable");
       const context = this.context!; const buffer = await context.decodeAudioData(await response.arrayBuffer());
       if (serial !== this.speechSerial) return false;
       const source = context.createBufferSource(); const gain = context.createGain(); source.buffer = buffer;
-      gain.gain.value = Math.max(0, Math.min(1, volume)); source.playbackRate.value = 0.94;
-      source.connect(gain).connect(context.destination); this.activeSource = source;
-      await new Promise<void>((resolve) => { source.onended = () => { source.disconnect(); gain.disconnect(); if (this.activeSource === source) this.activeSource = null; resolve(); }; source.start(); });
+      gain.gain.value = this.volume; source.playbackRate.value = 0.94;
+      source.connect(gain).connect(context.destination); this.activeSource = source; this.activeGain = gain;
+      await new Promise<void>((resolve) => { source.onended = () => { source.disconnect(); gain.disconnect(); if (this.activeSource === source) { this.activeSource = null; this.activeGain = null; } resolve(); }; source.start(); });
       return serial === this.speechSerial;
-    } catch {
-      if (serial !== this.speechSerial) return false;
-      const synthesis = window.speechSynthesis; if (!synthesis) return false;
-      const language = /[\u0900-\u097f]/.test(text) ? "hi" : "en";
-      const voices = synthesis.getVoices();
-      const female = voices.find((v) => v.lang.startsWith(language) && /zira|heera|swara|sonia|hazel|susan|samantha|female|google हिन्दी|google us english/i.test(v.name));
-      if (!female) return false;
-      const utterance = new SpeechSynthesisUtterance(text); utterance.voice = female; utterance.lang = female.lang; utterance.rate = 0.9; utterance.volume = volume;
-      return new Promise<boolean>((resolve) => { utterance.onend = () => resolve(serial === this.speechSerial); utterance.onerror = () => resolve(false); synthesis.speak(utterance); });
+    } catch (error) {
+      if (controller.signal.aborted) return false;
+      console.warn("ElevenLabs playback unavailable:", error instanceof Error ? error.message : "unknown playback error");
+      return false;
     }
   }
 }
 
 export class AmbientDirector {
   private context: AudioContext | null = null;
-  private gain: GainNode | null = null;
+  private master: GainNode | null = null;
+  private layers: Array<{ gain: GainNode; key: keyof Pick<SuspenseMix, "drone" | "buzz" | "pulse" | "noise"> }> = [];
+  private sources: AudioScheduledSourceNode[] = [];
+  private volume = 0.3;
+  private impactRate = 0;
+  private impactTimer = 0;
+  private lastState: [number, boolean, AudioPhase, boolean] = [0, false, "onboarding", false];
+  private visibility = () => { if (!this.context) return; void (document.hidden ? this.context.suspend() : this.context.resume()); };
   async start(volume = 0.3) {
+    this.volume = volume;
     if (this.context) { await this.context.resume(); return; }
-    const context = new AudioContext(); const oscillator = context.createOscillator(); const gain = context.createGain();
-    oscillator.type = "sine"; oscillator.frequency.value = 43; gain.gain.value = volume * 0.025;
-    oscillator.connect(gain).connect(context.destination); oscillator.start(); this.context = context; this.gain = gain;
+    const context = new AudioContext(); const master = context.createGain();
+    master.gain.value = volume * 0.34; master.connect(context.destination);
+    this.context = context; this.master = master;
+    const oscillator = (type: OscillatorType, frequency: number, key: "drone" | "buzz" | "pulse", filterType: BiquadFilterType, filterFrequency: number) => {
+      const source = context.createOscillator(); const filter = context.createBiquadFilter(); const gain = context.createGain();
+      source.type = type; source.frequency.value = frequency; filter.type = filterType; filter.frequency.value = filterFrequency; filter.Q.value = 1.4; gain.gain.value = 0;
+      source.connect(filter).connect(gain).connect(master); source.start(); this.sources.push(source); this.layers.push({ gain, key });
+    };
+    oscillator("sine", 43, "drone", "lowpass", 150);
+    oscillator("sawtooth", 118, "buzz", "bandpass", 220);
+    oscillator("sine", 31, "pulse", "lowpass", 90);
+    const buffer = context.createBuffer(1, context.sampleRate * 2, context.sampleRate); const data = buffer.getChannelData(0);
+    for (let index = 0; index < data.length; index++) data[index] = Math.random() * 2 - 1;
+    const noise = context.createBufferSource(); const noiseFilter = context.createBiquadFilter(); const noiseGain = context.createGain();
+    noise.buffer = buffer; noise.loop = true; noiseFilter.type = "bandpass"; noiseFilter.frequency.value = 620; noiseFilter.Q.value = 0.7; noiseGain.gain.value = 0;
+    noise.connect(noiseFilter).connect(noiseGain).connect(master); noise.start(); this.sources.push(noise); this.layers.push({ gain: noiseGain, key: "noise" });
+    this.impactTimer = window.setInterval(() => { if (this.context?.state === "running" && Math.random() < this.impactRate) this.impact(0.45); }, 2600);
+    document.addEventListener("visibilitychange", this.visibility);
+    this.setTension(...this.lastState);
   }
-  setVolume(volume: number) { if (this.gain) this.gain.gain.value = volume * 0.025; }
-  hit() { /* The caller's voice is the primary feedback; no overlapping alarm. */ }
+  setVolume(volume: number) {
+    this.volume = volume;
+    if (this.master && this.context) this.master.gain.setTargetAtTime(volume * 0.34, this.context.currentTime, 0.12);
+  }
+  setTension(danger: number, mimicVisible: boolean, phase: AudioPhase, ducked: boolean) {
+    this.lastState = [danger, mimicVisible, phase, ducked];
+    const mix = mixForTension(danger, mimicVisible, phase, ducked); this.impactRate = mix.impactRate;
+    if (!this.context) return;
+    for (const layer of this.layers) layer.gain.gain.setTargetAtTime(mix[layer.key], this.context.currentTime, 0.5);
+  }
+  private impact(strength: number) {
+    if (!this.context || this.context.state !== "running" || !this.master || !this.volume) return;
+    const source = this.context.createOscillator(); const gain = this.context.createGain(); const now = this.context.currentTime;
+    source.type = "sine"; source.frequency.setValueAtTime(94, now); source.frequency.exponentialRampToValueAtTime(38, now + 0.34);
+    gain.gain.setValueAtTime(0.0001, now); gain.gain.exponentialRampToValueAtTime(0.12 * strength, now + 0.015); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+    source.connect(gain).connect(this.master); source.start(now); source.stop(now + 0.45);
+    source.onended = () => { source.disconnect(); gain.disconnect(); };
+  }
+  hit() { this.impact(1); }
+  stop() {
+    window.clearInterval(this.impactTimer); document.removeEventListener("visibilitychange", this.visibility);
+    for (const source of this.sources) { try { source.stop(); } catch { /* Already stopped. */ } }
+    this.sources = []; this.layers = []; void this.context?.close(); this.context = null; this.master = null;
+  }
 }

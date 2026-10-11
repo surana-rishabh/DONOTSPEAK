@@ -49,7 +49,7 @@ export const STATIONS = [
 ] as const;
 
 const TARGETS: Array<[WorldSnapshot["callerPosition"], string, string[]]> = [
-  ["door", "red_door", ["a", "ए", "red barrier", "red mark", "red threshold", "blue door", "door", "threshold", "exit", "entrance", "लाल निशान", "लाल रुकावट", "नीला दरवाजा", "darwaza", "दरवाजा", "दरवाज़ा", "darwaze", "lal nishan", "lal rukawat", "left", "बाएं", "बायें", "baaye"]],
+  ["door", "red_door", ["to a", "marker a", "point a", "ए", "red barrier", "red mark", "red threshold", "blue door", "door", "threshold", "exit", "entrance", "लाल निशान", "लाल रुकावट", "नीला दरवाजा", "darwaza", "दरवाजा", "दरवाज़ा", "darwaze", "lal nishan", "lal rukawat", "left", "बाएं", "बायें", "baaye"]],
   ["utility", "utility", ["b", "बी", "utility", "generator", "breaker", "power station", "बिजली केंद्र", "जनरेटर", "ब्रेकर", "bijli kendra", "right", "दाएं", "daaye"]],
   ["observation", "observation", ["c", "सी", "observation", "signal station", "monitor", "screen", "सिग्नल केंद्र", "स्क्रीन", "निगरानी", "signal kendra"]],
   ["stairwell", "stairwell", ["d", "डी", "stairs", "stairwell", "holding area", "सीढ़ी", "सीढ़ियों", "रोकने की जगह", "seedhi", "सीढी"]],
@@ -61,7 +61,7 @@ const TARGETS: Array<[WorldSnapshot["callerPosition"], string, string[]]> = [
 export type Instruction = { kind: TurnResolution["action"]["kind"]; targetId: string | null; route: WorldSnapshot["callerPosition"] | null; operation: "release" | "seal" | "activate" | "deactivate" | null; confirm: boolean; verdict: "trust" | "contain" | null; negated: boolean };
 export function parseInstruction(text: string, state: WorldSnapshot): Instruction {
   const negated = hasPhrase(text, ["don't", "do not", "never", "मत", "नहीं", "mat", "nahi"]);
-  const target = TARGETS.find(([, , aliases]) => hasPhrase(text, aliases));
+  const target = TARGETS.find(([, , aliases]) => aliases.some((alias) => hasPhrase(text, [alias]) && (alias !== "to a" || words(text).at(-1) === "a")));
   const move = hasPhrase(text, ["go", "move", "walk", "head", "reach", "toward", "towards", "चलो", "जाओ", "जाना", "चल", "chalo", "jao", "चलें", "पहुंचो", "आगे बढ़ो"]);
   const inspect = hasPhrase(text, ["inspect", "check", "scan", "compare", "test", "जांच", "जाँच", "जांचो", "जाँचो", "जांच करो", "परखो", "jaanch", "janch"]);
   let operation: Instruction["operation"] = null;
@@ -69,7 +69,7 @@ export function parseInstruction(text: string, state: WorldSnapshot): Instructio
   else if (hasPhrase(text, ["release", "unseal", "unlock", "open", "हटाओ", "हटा", "छोड़ो", "kholo", "khol", "खोल", "खोलो", "hatao"])) operation = "release";
   if (hasPhrase(text, ["turn off", "power off", "deactivate", "बिजली बंद", "bijli band"])) operation = "deactivate";
   else if (hasPhrase(text, ["activate", "restore", "turn on", "power on", "चालू", "बहाल", "chalu", "bahal"])) operation = "activate";
-  const confirm = hasPhrase(text, ["proceed", "continue", "verify", "confirm", "आगे", "पुष्टि", "आगे बढ़ो", "aage", "pushti"]);
+  const confirm = hasPhrase(text, ["proceed", "continue", "verify", "confirm", "go ahead", "carry on", "keep going", "let's go", "lets go", "move forward", "all set", "आगे", "पुष्टि", "आगे बढ़ो", "आगे चलो", "जारी रखो", "बढ़ो", "aage", "pushti", "badho", "jaari rakho"]);
   const verdict = hasPhrase(text, ["contain", "isolate", "रोकें", "रोको", "अलग", "roko", "alag"]) ? "contain"
     : hasPhrase(text, ["trust", "human", "भरोसा", "इंसान", "bharosa", "insaan"]) ? "trust" : null;
   return { kind: negated ? "refuse" : inspect ? "inspect" : operation ? "interact" : move && target ? "move" : "wait",
@@ -83,18 +83,19 @@ export function localTurn(state: WorldSnapshot, transcript: string): TurnResolut
   const mutations: Mutation[] = [];
   if (input.route) mutations.push({ kind: "move_actor", targetId: "caller", value: input.route });
   const atDoor = ["door", "threshold", "exit"].includes(state.callerPosition);
-  if (atDoor && input.targetId === "red_door" && input.operation === "release") mutations.push({ kind: "open", targetId: "red_door", value: true });
-  if ((atDoor || state.callerPosition === "stairwell") && input.operation === "seal") mutations.push({ kind: "close", targetId: "red_door", value: false });
-  if (state.callerPosition === "utility" && input.operation === "activate") mutations.push({ kind: "power_on", targetId: "utility", value: true });
-  if (state.callerPosition === "utility" && input.operation === "deactivate") mutations.push({ kind: "power_off", targetId: "utility", value: false });
+  if (!input.route && atDoor && input.targetId === "red_door" && input.operation === "release") mutations.push({ kind: "open", targetId: "red_door", value: true });
+  if (!input.route && (atDoor || state.callerPosition === "stairwell") && input.operation === "seal") mutations.push({ kind: "close", targetId: "red_door", value: false });
+  if (!input.route && state.callerPosition === "utility" && input.operation === "activate") mutations.push({ kind: "power_on", targetId: "utility", value: true });
+  if (!input.route && state.callerPosition === "utility" && input.operation === "deactivate") mutations.push({ kind: "power_off", targetId: "utility", value: false });
   const hi = state.language === "hi";
   const text = input.negated ? hi ? "ठीक है। मैं यहीं रुकी हूँ।" : "Understood. I am staying here."
     : input.route ? hi ? "मैं उस निशान तक धीरे चल रही हूँ। अगला निर्देश?" : "Moving carefully to that marker. What next?"
     : mutations.length ? hi ? "हो गया। अब आप आगे बढ़ने की पुष्टि कर सकते हैं।" : "Done. You can confirm when you are ready."
+    : input.operation ? hi ? "पहले सही निशान तक पहुँचें, फिर यह निर्देश दें।" : "Reach the correct marker first, then give that instruction."
     : input.kind === "inspect" ? hi ? "सिग्नल की जाँच कर रही हूँ।" : "Checking the signal."
     : hi ? "कृपया एक निर्देश दें। किसी निशान तक जाना है, या यहीं कुछ करना है?" : "One instruction at a time. Should I move to a marker, or act here?";
   return { version: "1.0", interpretation: text, action: { kind: input.kind, targetId: input.targetId },
-    learnedConcepts: extractConcepts(transcript).slice(0, 4), mutations,
+    learnedConcepts: extractConcepts(transcript), mutations,
     response: { speaker: "caller", text, emotion: input.kind === "wait" ? "confused" : "afraid" }, dangerDelta: 0, outcome: "continue" };
 }
 
@@ -111,16 +112,16 @@ export function guardTurn(result: TurnResolution, state: WorldSnapshot, transcri
     || m.kind === "power_on" && m.targetId === "utility" && state.callerPosition === "utility").slice(0, 1) : [];
   const useLocal = parsed.kind !== "wait" || parsed.confirm || parsed.verdict || parsed.negated;
   return { ...result, action: useLocal ? local.action : groundedMove.length ? result.action : { kind: "wait", targetId: null },
-    learnedConcepts: extractConcepts(transcript).filter((c) => !state.vocabulary.includes(c.concept)).slice(0, 4),
+    learnedConcepts: extractConcepts(transcript).filter((c) => !state.vocabulary.includes(c.concept)),
     mutations: useLocal ? local.mutations : [...groundedMove, ...groundedInteraction], dangerDelta: 0, outcome: "continue",
-    response: parsed.negated || (parsed.operation && !local.mutations.length) ? local.response : result.response };
+    response: parsed.negated || (parsed.operation && !local.mutations.length) || (!useLocal && !groundedMove.length && !groundedInteraction.length && result.action.kind !== "wait") ? local.response : result.response };
 }
 
 export function objectiveSteps(state: Pick<WorldSnapshot, "objective" | "language">): string[] {
   const hi = state.language === "hi";
   switch (state.objective) {
-    case "escape": return hi ? ["A तक जाएँ", "रुकावट हटाएँ", "‘आगे’ कहें"] : ["Reach A", "Release the barrier", "Say ‘proceed’"];
-    case "restore_power": return hi ? ["B तक जाएँ", "केंद्र चालू करें", "‘पुष्टि’ कहें"] : ["Reach B", "Activate the station", "Say ‘verify’"];
+    case "escape": return hi ? ["A तक जाएँ", "रुकावट हटाएँ", "आगे बढ़ने को कहें"] : ["Reach A", "Release the barrier", "Tell the caller to continue"];
+    case "restore_power": return hi ? ["B तक जाएँ", "केंद्र चालू करें", "काम पूरा होने की पुष्टि करें"] : ["Reach B", "Activate the station", "Confirm the station is ready"];
     case "identify_caller": return hi ? ["C तक जाएँ", "सिग्नल जाँचें", "भरोसा करें या रोकें"] : ["Reach C", "Check the signal", "Say ‘trust’ or ‘contain’"];
     case "trap_entity": return hi ? ["D तक जाएँ", "वहाँ रुकें", "क्षेत्र सील करें"] : ["Reach D", "Wait there", "Seal the area"];
   }

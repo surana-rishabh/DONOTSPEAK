@@ -1,7 +1,7 @@
 {
   "name": "DO NOT SAY IT",
   "short_name": "DNSI",
-  "description": "A voice-controlled semantic horror game where spoken concepts become monster abilities.",
+  "description": "An English and Hindi voice puzzle about guiding an unknown caller without teaching an impostor dangerous words.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#050707",

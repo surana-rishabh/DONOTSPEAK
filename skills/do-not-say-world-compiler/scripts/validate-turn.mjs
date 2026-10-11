@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
+import { TurnResolutionSchema } from "../../../shared/contracts.ts";
 
 const path = process.argv[2];
 if (!path) {
@@ -8,17 +9,7 @@ if (!path) {
 }
 
 const value = JSON.parse(await readFile(path, "utf8"));
-const actions = new Set(["move", "inspect", "interact", "wait", "refuse"]);
-const outcomes = new Set(["continue", "escaped", "caught", "identity_stolen"]);
-const mutations = new Set(["open", "close", "power_on", "power_off", "reveal", "hide", "move_actor", "spawn_shadow", "swap_voice", "camera_blackout", "exit_success", "caller_caught"]);
-const valid = value?.version === "1.0"
-  && actions.has(value?.action?.kind)
-  && Array.isArray(value?.learnedConcepts)
-  && Array.isArray(value?.mutations)
-  && value.mutations.every((item) => mutations.has(item?.kind) && typeof item?.targetId === "string")
-  && Number.isInteger(value?.dangerDelta) && value.dangerDelta >= -2 && value.dangerDelta <= 3
-  && outcomes.has(value?.outcome)
-  && typeof value?.response?.text === "string";
+const valid = TurnResolutionSchema.safeParse(value).success;
 
 if (!valid) {
   console.error("invalid TurnResolution");

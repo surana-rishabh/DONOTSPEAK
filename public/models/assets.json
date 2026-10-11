@@ -1,16 +1,16 @@
 {
   "version": 1,
   "models": [
-    { "id": "room_archive", "file": "/models/room_archive.glb", "enabled": false, "role": "room", "scale": 1, "position": [0,0,0], "rotation": [0, 0, 0] },
+    { "id": "room_archive", "file": "/models/room_archive.glb", "enabled": false, "role": "room", "scale": 1, "position": [0, 0, 0], "rotation": [0, 0, 0] },
     { "id": "caller", "file": "/models/caller_mara.glb", "enabled": true, "role": "caller", "scale": 0.48, "position": [0, 0, 0], "rotation": [0, 0, 0] },
-    { "id": "mimic", "file": "/models/mimic_mara.glb", "enabled": true, "role": "mimic", "scale": 0.48, "position": [0, 0, 0], "rotation": [0, 0, 0] },
-    { "id": "red_door", "file": "/models/red_door.glb", "enabled": false, "role": "prop", "scale": 1, "position": [0, 0, 0], "rotation": [0, 0, 0] },
-    { "id": "desk", "file": "/models/desk_terminal.glb", "enabled": false, "role": "prop", "scale": 1, "position": [0.2, 0, -0.7], "rotation": [0, 0, 0] },
-    { "id": "locker", "file": "/models/locker_industrial.glb", "enabled": false, "role": "prop", "scale": 1, "position": [3.8, 0, -3.3], "rotation": [0, 0, 0] },
-    { "id": "red_lamp", "file": "/models/red_lamp.glb", "enabled": false, "role": "prop", "scale": 1, "position": [2.7, 2.4, 0.2], "rotation": [0, 0, 0] },
-    { "id": "mirror", "file": "/models/mirror_tall.glb", "enabled": false, "role": "prop", "scale": 1, "position": [4.86, 0.55, -1.8], "rotation": [0, -1.5708, 0] },
-    { "id": "radio", "file": "/models/radio_field.glb", "enabled": false, "role": "prop", "scale": 1, "position": [0.65, 1.2, -0.7], "rotation": [0, 0, 0] },
-    { "id": "vent", "file": "/models/wall_vent.glb", "enabled": false, "role": "prop", "scale": 1, "position": [-1.6, 0.25, -3.86], "rotation": [0, 0, 0] },
-    { "id": "clock", "file": "/models/archive_clock.glb", "enabled": false, "role": "prop", "scale": 1, "position": [0.2, 3.45, -3.85], "rotation": [0, 0, 0] }
+    { "id": "mimic", "file": "/models/mimic_mara.glb", "enabled": true, "role": "mimic", "scale": 0.48, "position": [2.4, 0, -1.8], "rotation": [0, 0, 0] },
+    { "id": "red_door", "file": "/models/red_door.glb", "enabled": true, "role": "prop", "scale": 1.18, "position": [-3.55, 0, -3.83], "rotation": [0, 0, 0] },
+    { "id": "desk", "file": "/models/desk_terminal.glb", "enabled": true, "role": "prop", "scale": 0.062, "position": [0.2, 0, -0.7], "rotation": [0, 0, 0] },
+    { "id": "locker", "file": "/models/locker_industrial.glb", "enabled": true, "role": "prop", "scale": 0.54, "position": [3.8, 0, -3.3], "rotation": [0, 0, 0] },
+    { "id": "red_lamp", "file": "/models/red_lamp.glb", "enabled": true, "role": "prop", "scale": 0.16, "position": [2.7, 2.4, 0.2], "rotation": [0, 0, 0] },
+    { "id": "mirror", "file": "/models/mirror_tall.glb", "enabled": true, "role": "prop", "scale": 1.0, "position": [4.86, 0, -1.8], "rotation": [0, -1.5708, 0] },
+    { "id": "radio", "file": "/models/radio_field.glb", "enabled": true, "role": "prop", "scale": 0.00075, "position": [0.65, 0.95, -0.7], "rotation": [0, 0, 0] },
+    { "id": "vent", "file": "/models/wall_vent.glb", "enabled": true, "role": "prop", "scale": 0.4, "position": [-1.6, 0.45, -3.86], "rotation": [0, 1.5708, 0] },
+    { "id": "clock", "file": "/models/archive_clock.glb", "enabled": true, "role": "prop", "scale": 0.0078, "position": [0.2, 2.7, -3.86], "rotation": [0, 0, 0] }
   ]
 }

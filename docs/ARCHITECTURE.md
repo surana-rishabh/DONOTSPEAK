@@ -1,23 +1,23 @@
 # Architecture
 
-## Trust boundary
+Browser capture → server Scribe v2 → one transcript → Gemma intent → shared guard → pure engine → scene/captions → female TTS.
 
-The browser owns presentation and microphone capture. The Express server owns permanent provider credentials. Gemma output is always untrusted data.
+shared/contracts.ts is the schema boundary. shared/rules.ts owns bilingual aliases, locations, parser, fallback, and model guard. Server and browser use the same rules. src/game/engine.ts owns objective steps, exposure, vocabulary, score, and outcomes. Renderer reflects state; camera controls cannot move the logical caller.
 
-1. `VoiceChannel` explicitly requests microphone permission. It attempts Scribe Realtime using a server-minted single-use token; if that transport fails, push-to-talk records a clip and the server sends it to Scribe v2 batch transcription.
-2. A committed utterance is combined with a compressed Three.js frame and a bounded `WorldSnapshot`.
-3. `WorldModelProvider` returns a candidate `TurnResolution`.
-4. Zod checks structure; `enforceTurn` removes invented targets, derives concepts from exact transcript words, and clamps the response.
-5. The pure game engine applies whitelisted mutations.
+Gemma interprets English/Hindi/Hinglish and a compressed screenshot. It proposes one intent, never a trusted outcome. Exact transcript aliases determine learning. Known commands override model mistakes. Unknown grounded directions can move only to listed destinations; interactions require proximity. The engine independently checks ordered steps and final keywords. Ended calls cannot be rescored.
+
+Calls rotate through a fixed escape tutorial and three authored templates. Gemma may vary a bounded opening line, not invent levels, assets, code, or win conditions. Vocabulary persists; each newly named concept adds its severity, and repeated known concepts still add one exposure. Exposure resets per call. Learning is game state, not weight training; power classes describe risk rather than twelve separate monster animations.
+
+Microphone access is explicit. Idle tracks are muted; one held recording lasts at most 15 seconds. Disconnect/new shift cancels pending work. Browser recognition supplies partial text or one fallback, not a second turn. Playback stops before recording. TTS requires female metadata; unavailable output falls back to a supported female browser voice or captions.
+
+Three.js uses responsive resolution, four stable presets, orbit controls, authoritative stations, slow corridor travel, projected DOM anchors, and cleanup. Plain view replaces WebGL without changing rules; returning restores the logical caller location.
 
 ## Degraded modes
 
-- Gemma unavailable: exact-word parser and authored fallbacks.
-- ElevenLabs Realtime unavailable: recorded push-to-talk through Scribe v2; if transcription also fails, typed commands.
-- ElevenLabs TTS unavailable: captions and browser speech.
-- WebGL unavailable: the interface remains navigable, but the visual-grounding mechanic requires WebGL for live model turns.
+- Gemma timeout/outage: shared local rules; UI labels Local rules.
+- Scribe unavailable: captured browser transcript if present, otherwise typed input.
+- Female TTS unavailable: female browser voice if supported, otherwise captions/status.
+- WebGL unavailable: typed rules/Plain view remain usable; visual grounding is unavailable.
 
-## Procedural boundary
-
-“Endless” calls do not generate arbitrary code or assets. Gemma composes `CallBlueprint` objects from four layouts, eight props, four objectives, and bounded language. The renderer also exposes five connected walkable sectors and five surveillance views; the compiler can move the caller only to listed sector IDs. This preserves replayability without giving a model control over rendering or execution.
+Health flags mean credentials are configured, not recent provider success. Live smoke and turn responses provide that evidence.
 

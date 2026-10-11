@@ -1,44 +1,25 @@
 # DO NOT SAY IT
 
-> A voice-controlled semantic horror game where every concept you speak becomes an ability the creature can use.
+A slower, bilingual voice-controlled deduction game. Guide an unknown caller through four small objectives without giving the impostor dangerous words. English, Hindi, and Hinglish commands work; the caller speaks with a female voice.
 
-![DO NOT SAY IT operator terminal](outputs/dnsi-breach-1440.png)
+The impostor's vocabulary is fictional game state, **not training or fine-tuning Gemma's weights**. Only exact dangerous words/aliases in your commands teach it; captions and AI replies do not.
 
-You are the night operator at the **Department of Unsaid Things**. Watch impossible rooms through low-resolution surveillance feeds, guide trapped callers with your voice, and describe what you see without naming it. The first call is a controlled prologue; later calls are compiled by Gemma from a bounded catalog while the creature permanently remembers its vocabulary.
+## Play
 
-## Why the AI is the mechanic
+| Call | Required steps | Safe example commands |
+| --- | --- | --- |
+| Escape | Reach A → release → confirm | Go to the red mark · Release the barrier · Proceed |
+| Restore power | Reach B → activate → verify | Go to B · Activate the station · Verify |
+| Identify caller | Reach C → inspect → decide from the clue | Go to C · Check the signal · Contain or Trust |
+| Contain entity | Reach D → wait for it → seal | Go to D · Wait · Seal the area |
 
-- **Gemma 4** sees the active surveillance frame and reads the committed transcript. It grounds indirect directions such as “the opening below the red light” and returns a strictly validated `TurnResolution`.
-- **ElevenLabs Scribe v2 Realtime** supplies partial speech for immediate danger-word feedback and committed speech for turns. If its realtime socket fails, the same push-to-talk control records locally and sends the completed clip to Scribe's transcription endpoint through the server.
-- **ElevenLabs Flash TTS** performs the caller and mimic. If voice services fail, captions and typed commands keep the run playable.
-- The open-source **world compiler harness** validates every model result against entity IDs, mutation kinds, and bounded danger changes before the deterministic engine executes it.
+Hindi escape: `लाल निशान तक जाओ` → `रुकावट हटाओ` → `आगे`. Hinglish: `lal nishan tak jao` → `rukawat hatao` → `aage`.
 
-Gemma proposes. The engine decides what is legal.
+No timer, automatic win, forced identity disclosure, or always-on microphone. One command does one action. Wait for arrival before the next instruction. Hints fill the editable textbox. Wrong identity decisions lose the signal; new dangerous words raise exposure by severity, and repeating a learned word adds one exposure. Vocabulary persists across calls, while exposure resets. At four exposure the mimic is revealed; at ten the signal is lost.
 
-## Architecture
+## Run locally
 
-```mermaid
-flowchart LR
-    Mic[Microphone] -->|single-use token| Scribe[ElevenLabs Scribe Realtime]
-    Mic -->|recorded fallback via server| Batch[Scribe v2 batch]
-    Scribe -->|partial transcript| HUD[React operator terminal]
-    Scribe -->|committed transcript| Turn[Turn request]
-    Batch -->|committed transcript| Turn
-    Three[Three.js surveillance room] -->|384x216 frame| Turn
-    Turn --> API[Express API on DigitalOcean]
-    API --> Gemma[Gemma 4 multimodal compiler]
-    Gemma -->|structured JSON| Guard[Zod and entity allowlist]
-    Guard --> Engine[Deterministic TypeScript engine]
-    Engine --> Three
-    Engine --> TTS[ElevenLabs Flash TTS]
-    TTS --> Player[Caller or mimic voice]
-```
-
-The renderer never owns game truth. React owns interface state, Three.js reflects it, and the pure engine applies validated mutations. See [Architecture](docs/ARCHITECTURE.md) and [Threat Model](docs/THREAT_MODEL.md).
-
-## Quick start
-
-Requirements: Node.js 22+ and current Chrome or Edge.
+Node.js 22+ and current Chrome or Edge:
 
 ```bash
 npm install
@@ -47,71 +28,54 @@ npm run check:env
 npm run dev
 ```
 
-Open `http://localhost:5173`. The dev server now fails rather than silently switching to another port when 5173 is occupied. Add `GEMINI_API_KEY` and `ELEVENLABS_API_KEY` to `.env` for live AI and voice. Without them, the golden call and typed deterministic fallback still work. Chrome or Edge must be allowed to use the microphone for this local origin. Click **ANSWER CALL** to trigger the browser's permission prompt; if it was previously blocked, reset the microphone permission in the address-bar site settings and retry.
+Open http://localhost:5173. Production: `npm run build`, then `npm start` at http://localhost:8080.
 
-### Environment
+Add GEMINI_API_KEY and ELEVENLABS_API_KEY for live services. Without them, all objectives remain playable with typed commands and shared local rules. Click **Enable microphone**, grant permission, and hold the button or V. Release sends one recording; capture stops after 15 seconds. Use localhost or HTTPS.
+
+## AI and voice
+
+- Gemma 4 receives a small game screenshot, transcript, language, and bounded state. It proposes one intent. Shared rules validate target, proximity, dangerous words, and completion.
+- One MediaRecorder path sends each held utterance to Scribe v2 through the server. Optional browser recognition supplies interim text and one fallback; it never independently submits duplicate turns.
+- ElevenLabs metadata must identify the selected output as female. Default selection finds an available female voice; a configured male voice is not accepted. Flash v2.5 supports English/Hindi. On outage, a supported female browser voice or captions are used.
+- Keys stay on the server. Recordings/transcripts are not persisted server-side. Provider-side policies still apply.
 
 | Variable | Purpose |
 | --- | --- |
-| `GEMINI_API_KEY` | Hosted Gemma 4 through the Gemini API |
-| `GEMMA_MODEL` | Defaults to `gemma-4-26b-a4b-it` |
-| `GEMMA_TURN_TIMEOUT_MS` | Hosted model deadline, default 11000 ms (the client fails over at 11500 ms) |
-| `ELEVENLABS_API_KEY` | Server-only token minting and TTS |
-| `ELEVENLABS_VOICE_ID` | Caller voice |
-| `ELEVENLABS_MIMIC_VOICE_ID` | Optional alternate mimic voice |
-| `ELEVENLABS_MODEL_ID` | Defaults to low-latency `eleven_flash_v2_5` |
-| `ELEVENLABS_OUTPUT_FORMAT` | Defaults to `mp3_44100_128` |
+| GEMINI_API_KEY | Hosted Gemma access |
+| GEMMA_MODEL | Default gemma-4-26b-a4b-it |
+| GEMMA_TURN_TIMEOUT_MS | Default 12000 ms; client deadline 15000 ms |
+| ELEVENLABS_API_KEY | Scribe, TTS, voice metadata |
+| ELEVENLABS_FEMALE_VOICE_ID | Optional preferred female ID, validated at runtime |
+| ELEVENLABS_VOICE_ID | Legacy preferred ID, accepted only if female |
+| ELEVENLABS_MODEL_ID | Default eleven_flash_v2_5 |
+| ELEVENLABS_OUTPUT_FORMAT | Default mp3_44100_128 |
+| HOST | Default 127.0.0.1; deployment uses 0.0.0.0 |
 
-API keys never enter the browser. The client receives only a short-lived, single-use Scribe token. The recorded fallback sends audio to the app server for transcription but does not persist it there.
+Self-hosted Gemma: GEMMA_BASE_URL, GEMMA_LOCAL_MODEL, optional GEMMA_LOCAL_API_KEY. Endpoint must support OpenAI-compatible multimodal JSON. Separately verify your chosen endpoint.
 
-## Custom 3D models
+## Interface and scene
 
-The supplied room and Mara models are enabled in [`public/models/assets.json`](public/models/assets.json), with a bundled DRACO decoder for their compressed meshes. Five connected sectors—Archive, Threshold, Utility, Observation, and Stairwell—can be inspected through separate cameras and traversed by spoken or typed directions such as “go to utility.” Further models can replace props through the manifest. Confirm redistribution rights for every supplied GLB before publishing the repo. Details: [`public/models/README.md`](public/models/README.md).
+Four camera presets, drag orbit, wheel zoom, focused-canvas arrow/WASD panning, and reset affect the view—not game truth. A–D labels anchor to world positions. Drag or keyboard-adjust captions; swap panels/change console width in Layout. Small screens place captions below the scene. Plain view, captions, reduced motion, keyboard controls, and volume are available.
 
-## Self-hosted Gemma
+Caller/mimic GLBs use local DRACO decoding. A procedural low-wall room keeps stations visible; the old room shell is intentionally disabled. Asset redistribution rights remain unverified. See [model notes](public/models/README.md).
 
-The `WorldModelProvider` boundary supports a hosted `@google/genai` provider and an OpenAI-compatible local provider. To swap:
-
-```env
-GEMMA_BASE_URL=http://localhost:11434/v1
-GEMMA_LOCAL_MODEL=gemma3:4b
-GEMMA_LOCAL_API_KEY=
-```
-
-Keep the same `CallBlueprint` and `TurnResolution` contracts. The self-hosted endpoint must accept multimodal chat messages and JSON output.
-
-## Commands
+## Checks
 
 ```bash
-npm run check     # strict TypeScript
-npm test          # engine and contract tests
-npm run build     # production client
-npm start         # Express production server
-npm run smoke:providers         # live Gemma, Scribe token, and TTS checks
-npm run qa:voice               # browser microphone and recorded-fallback test
-npm run qa:visual:integrated    # launch app, play prologue, capture QA frames
+npm run check
+npm test
+npm run build
+npm run smoke:providers
+npm run qa:voice
+npm run qa:visual
+npm run qa:visual:integrated
 ```
 
-## Agent Skill
+Browser QA requires Chrome at the path in the scripts. qa:visual tests a running server (QA_BASE_URL, default localhost:8080); integrated QA starts port 8491 after a build. QA_OUTPUT_DIR selects screenshot/report output. Microphone QA uses a simulated device/mocked transcript; provider smoke separately checks real female TTS and English/Hindi transcription.
 
-[`skills/do-not-say-world-compiler/SKILL.md`](skills/do-not-say-world-compiler/SKILL.md) packages the visual grounding and mutation rules as an Agent Skill Open Standard skill, with a contract reference and executable validator.
+See [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), [demo](docs/DEMO_SCRIPT.md), and [world compiler skill](skills/do-not-say-world-compiler/SKILL.md).
 
-## Deployment
+## Deployment and license
 
-The repository includes [`.do/app.yaml`](.do/app.yaml) for a single DigitalOcean App Platform service. Configure `GEMINI_API_KEY`, `ELEVENLABS_API_KEY`, and voice IDs as encrypted runtime variables in DigitalOcean—never in Git.
-
-## Privacy and accessibility
-
-- The microphone is opt-in and always has a visible state.
-- The fictional line may be “compromised,” but the real mute control always disables the microphone track.
-- This app does not persist audio or transcripts server-side.
-- Captions, typed input, reduced motion, volume control, keyboard focus, and deterministic fallbacks are included.
-
-## Demo
-
-Use the [two-minute demo script](docs/DEMO_SCRIPT.md). The intended first command is deliberately unsafe: **“Open the red door.”** The intended final move is silence.
-
-## License
-
-Apache-2.0. Gemma model weights and hosted APIs have their own terms and are not included in this repository. Runtime-generated ElevenLabs audio is not committed.
+DigitalOcean manifest included; local verification is not deployment. Configure encrypted runtime keys. Public deployment needs authentication/provider quota controls and verified asset licenses. Apache-2.0 covers repository code; Gemma weights/services have separate terms. Generated audio is not committed.
 

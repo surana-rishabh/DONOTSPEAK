@@ -4,13 +4,15 @@ import { mkdir, writeFile } from "node:fs/promises";
 const browser = await chromium.launch({ executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true, args: ["--enable-webgl"] });
 try {
   const page = await browser.newPage({ viewport: { width: 680, height: 400 } });
-  await page.goto(process.env.BASE_URL || "http://localhost:5174/");
+  await page.goto(process.env.BASE_URL || "http://localhost:5173/");
   const frames = await page.evaluate(async () => {
     const { RoomRenderer } = await import("/src/render/RoomRenderer.ts");
     const canvas = document.createElement("canvas");
+    canvas.style.width = "100vw"; canvas.style.height = "100vh"; document.body.style.margin = "0";
     document.body.replaceChildren(canvas);
     const renderer = new RoomRenderer(canvas);
-    for (let attempt = 0; attempt < 80 && renderer.getAssetDiagnostics().length < 3; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 100));
+    for (let attempt = 0; attempt < 80 && renderer.getAssetDiagnostics().length < 2; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 100));
+    if (renderer.getAssetDiagnostics().length < 2) throw new Error("Caller/mimic models did not load");
     const arms = [];
     const nodeNames = [];
     renderer.caller.traverse((node) => { if (node.name) nodeNames.push(node.name); if (/Arm1/i.test(node.name)) arms.push(node); });
@@ -29,8 +31,9 @@ try {
   });
   console.log(frames.names);
   console.log(frames.nodeNames);
-  await mkdir("outputs/poses", { recursive: true });
-  for (const frame of frames.results) await writeFile(`outputs/poses/${frame.axis}.png`, Buffer.from(frame.data.split(",")[1], "base64"));
+  const output = process.env.QA_OUTPUT_DIR || "outputs/poses";
+  await mkdir(output, { recursive: true });
+  for (const frame of frames.results) await writeFile(`${output}/${frame.axis}.png`, Buffer.from(frame.data.split(",")[1], "base64"));
 } finally {
   await browser.close();
 }

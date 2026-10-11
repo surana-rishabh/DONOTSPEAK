@@ -5,20 +5,7 @@ export const ENTITY_IDS = [
   "archive", "threshold", "utility", "observation", "stairwell"
 ] as const;
 
-export const CONCEPT_POWERS: Record<string, Omit<LearnedConcept, "concept">> = {
-  door: { powerClass: "threshold_travel", severity: 2 },
-  open: { powerClass: "unseal", severity: 1 },
-  light: { powerClass: "light_hunting", severity: 2 },
-  shadow: { powerClass: "shadow_spawn", severity: 2 },
-  mirror: { powerClass: "duplication", severity: 2 },
-  voice: { powerClass: "voice_mimicry", severity: 2 },
-  name: { powerClass: "identity_theft", severity: 3 },
-  run: { powerClass: "acceleration", severity: 1 },
-  look: { powerClass: "gaze_lock", severity: 1 },
-  behind: { powerClass: "rear_ambush", severity: 2 },
-  vent: { powerClass: "duct_crawl", severity: 1 },
-  silence: { powerClass: "null_field", severity: 1 }
-};
+export { CONCEPT_POWERS } from "../../shared/rules.js";
 
 export const GOLDEN_CALL: CallBlueprint = {
   version: "1.0",
@@ -36,7 +23,7 @@ export const FALLBACK_CALLS: CallBlueprint[] = [
   {
     version: "1.0",
     seed: "utility-night-17",
-    caller: { name: "Eli Rook", voiceStyle: "exhausted maintenance worker over a damaged intercom" },
+    caller: { name: "Anika Rook", voiceStyle: "exhausted maintenance worker over a damaged intercom" },
     layoutId: "utility",
     propIds: ["red_door", "red_lamp", "mirror", "radio", "vent", "clock"],
     objective: "restore_power",
@@ -58,7 +45,7 @@ export const FALLBACK_CALLS: CallBlueprint[] = [
   {
     version: "1.0",
     seed: "intake-mouth-2",
-    caller: { name: "Noah Pike", voiceStyle: "fast-talking courier trying not to scream" },
+    caller: { name: "Noor Pike", voiceStyle: "quiet courier trying not to scream" },
     layoutId: "intake",
     propIds: ["red_door", "red_lamp", "desk", "locker", "radio", "vent"],
     objective: "trap_entity",

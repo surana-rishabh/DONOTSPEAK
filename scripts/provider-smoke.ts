@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { createScribeToken, synthesizeSpeech, transcribeAudio } from "../server/elevenLabs.js";
+import { createScribeToken, selectFemaleVoice, synthesizeSpeech, transcribeAudio } from "../server/elevenLabs.js";
 import { generateWorldCall } from "../server/worldCompiler.js";
 
 type Check = { provider: string; ok: boolean; detail: string; durationMs: number };
@@ -15,19 +15,30 @@ async function check(provider: string, run: () => Promise<string>): Promise<Chec
 }
 
 const results = await Promise.all([
+  check("female-voice-selection", async () => {
+    const id = await selectFemaleVoice();
+    if (!id) throw new Error("Female voice missing");
+    return "selected from ElevenLabs voices labeled female";
+  }),
   check("elevenlabs-scribe", async () => {
     const token = await createScribeToken();
     return `single-use token received (${token.length} chars)`;
   }),
   check("elevenlabs-tts", async () => {
-    const audio = await synthesizeSpeech("Control, the room can hear us.");
+    const audio = await synthesizeSpeech("Control, the room can hear us.", "caller", "Mara Vale");
     return `audio received (${audio.byteLength} bytes)`;
   }),
   check("elevenlabs-recorded-stt", async () => {
-    const audio = await synthesizeSpeech("Open the red door.");
+    const audio = await synthesizeSpeech("Open the red door.", "mimic", "Mara Vale");
     const transcript = await transcribeAudio(Buffer.from(audio).toString("base64"), "audio/mpeg");
     if (!/red|door/i.test(transcript)) throw new Error(`Unexpected transcript: ${transcript.slice(0, 80)}`);
     return `voice round trip: ${transcript.slice(0, 80)}`;
+  }),
+  check("elevenlabs-hindi-round-trip", async () => {
+    const audio = await synthesizeSpeech("लाल निशान तक जाओ।", "caller", "Mara Vale", "hi");
+    const transcript = await transcribeAudio(Buffer.from(audio).toString("base64"), "audio/mpeg", "hi");
+    if (!/लाल|निशान/.test(transcript)) throw new Error(`Unexpected Hindi transcript: ${transcript.slice(0, 80)}`);
+    return `Hindi female TTS → Scribe: ${transcript}`;
   }),
   check("gemma-world", async () => {
     const result = await generateWorldCall({ callIndex: 2, vocabulary: ["door", "open"], previousOutcome: "escaped" });

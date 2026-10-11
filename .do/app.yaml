@@ -13,14 +13,14 @@ services:
       - key: NODE_ENV
         value: production
         scope: RUN_TIME
+      - key: HOST
+        value: "0.0.0.0"
+        scope: RUN_TIME
       - key: GEMMA_MODEL
         value: gemma-4-26b-a4b-it
         scope: RUN_TIME
-      - key: DEMO_MODE
-        value: "true"
-        scope: RUN_TIME
       - key: GEMMA_TURN_TIMEOUT_MS
-        value: "11000"
+        value: "12000"
         scope: RUN_TIME
     health_check:
       http_path: /api/health

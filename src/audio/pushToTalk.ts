@@ -21,7 +21,7 @@ export function finishPushToTalk(connection: PushToTalkConnection, schedule: Sch
 
 export function diagnoseMicrophoneEnvironment(environment: MicrophoneEnvironment): string | null {
   if (!environment.isSecureContext && environment.hostname !== "localhost" && environment.hostname !== "127.0.0.1") {
-    return `Microphone blocked by the browser. Open the game over HTTPS or at http://localhost. To allow on LAN Chrome: open chrome://flags/#unsafely-treat-insecure-origin-as-secure, add http://${environment.hostname}:5173, enable & relaunch.`;
+    return "Microphone requires HTTPS or http://localhost. Open the game at a secure address, or use typed instructions.";
   }
   if (!environment.hasGetUserMedia) {
     return "This browser cannot access a microphone here. Check microphone permission, then reload and retry.";

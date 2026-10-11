@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { LearnedConceptSchema, type CallBlueprint, type LearnedConcept, type Outcome, type TurnResolution, type WorldSnapshot } from "../../shared/contracts.js";
-import { guardTurn, localTurn, parseInstruction, STATION_POSITIONS, type Language } from "../../shared/rules.js";
+import { CONCEPT_POWERS, extractConcepts, guardTurn, localTurn, parseInstruction, STATION_POSITIONS, type Language } from "../../shared/rules.js";
 import { ENTITY_IDS, FALLBACK_CALLS, GOLDEN_CALL } from "./catalog.js";
 export { extractConcepts } from "../../shared/rules.js";
 
@@ -25,7 +25,7 @@ function loadProgress() {
   try {
     if (typeof localStorage === "undefined") return empty;
     const value = SavedSchema.safeParse(JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"));
-    return value.success ? value.data : empty;
+    return value.success ? { ...value.data, vocabulary: value.data.vocabulary.filter((c) => Object.hasOwn(CONCEPT_POWERS, c.concept)).map((c) => ({ concept: c.concept, ...CONCEPT_POWERS[c.concept] })) } : empty;
   } catch { return empty; }
 }
 export function persistProgress(state: GameState) {
@@ -47,13 +47,13 @@ export function openingLine(state: GameState) {
 }
 export function startGoldenCall(state: GameState, codename: string): GameState {
   return { ...createInitialState(), language: state.language, score: state.score, survivors: state.survivors,
-    vocabulary: state.vocabulary, phase: "briefing", operatorCodename: codename.trim() || "NIGHTJAR", caption: GOLDEN_CALL.openingLine };
+    vocabulary: state.vocabulary, phase: "briefing", operatorCodename: codename.trim() || "NIGHTJAR", caption: openingLine({ ...state, blueprint: GOLDEN_CALL }) };
 }
 export function beginCall(state: GameState): GameState {
   return { ...state, phase: "active", caption: openingLine(state), log: [{ id: id(), type: "caller", text: openingLine(state) }] };
 }
 export const withPartial = (state: GameState, partialTranscript: string): GameState => ({ ...state, partialTranscript });
-export const markResolving = (state: GameState, transcript: string): GameState => ({ ...state, phase: "resolving", lastTranscript: transcript, partialTranscript: "" });
+export const markResolving = (state: GameState, transcript: string): GameState => state.phase === "active" ? ({ ...state, phase: "resolving", lastTranscript: transcript, partialTranscript: "" }) : state;
 export function snapshot(state: GameState): WorldSnapshot {
   return { language: state.language, steps: state.steps, signalChecked: state.signalChecked,
     callId: state.callId, callIndex: state.callIndex, prologueBeat: state.prologueBeat, danger: state.danger,
@@ -81,7 +81,8 @@ export function applyResolution(state: GameState, raw: TurnResolution, degraded 
   }
   const fresh = result.learnedConcepts.filter((c) => !state.vocabulary.some((known) => known.concept === c.concept));
   next.vocabulary = [...state.vocabulary, ...fresh];
-  next.danger = Math.min(10, state.danger + fresh.reduce((sum, c) => sum + c.severity, 0));
+  const repeated = extractConcepts(state.lastTranscript).filter((c) => state.vocabulary.some((known) => known.concept === c.concept));
+  next.danger = Math.min(10, state.danger + fresh.reduce((sum, c) => sum + c.severity, 0) + repeated.length);
   next.mimicVisible = state.mimicVisible || next.danger >= 4;
   const hi = state.language === "hi";
   const objective = state.blueprint.objective;
@@ -90,11 +91,11 @@ export function applyResolution(state: GameState, raw: TurnResolution, degraded 
   if (objective === "escape") {
     if (atDoor) steps.add("reach");
     if (steps.has("reach") && next.doorsOpen) steps.add("act");
-    if (steps.has("act") && atDoor && next.doorsOpen && instruction.confirm) steps.add("confirm");
+    if (state.steps.includes("act") && atDoor && next.doorsOpen && instruction.kind === "wait" && instruction.confirm) steps.add("confirm");
   } else if (objective === "restore_power") {
     if (next.callerPosition === "utility") steps.add("reach");
     if (steps.has("reach") && next.powerOn && result.mutations.some((m) => m.kind === "power_on")) steps.add("act");
-    if (steps.has("act") && next.callerPosition === "utility" && next.powerOn && instruction.confirm) steps.add("confirm");
+    if (state.steps.includes("act") && next.callerPosition === "utility" && next.powerOn && instruction.kind === "wait" && instruction.confirm) steps.add("confirm");
   } else if (objective === "identify_caller") {
     if (next.callerPosition === "observation") steps.add("reach");
     if (next.callerPosition === "observation" && instruction.kind === "inspect") {
@@ -103,7 +104,7 @@ export function applyResolution(state: GameState, raw: TurnResolution, degraded 
         ? hi ? "सिग्नल आपकी पिछली बात हूबहू दोहरा रहा है। साँस की कोई आवाज़ नहीं है।" : "The signal repeats your last sentence exactly. There is no breathing."
         : hi ? "हर जवाब अलग है। सिग्नल में साँस और धड़कन सुनाई देती है।" : "Each response is different. The signal carries breathing and a heartbeat.";
     }
-    if (steps.has("act") && next.callerPosition === "observation" && instruction.verdict) {
+    if (state.steps.includes("act") && next.callerPosition === "observation" && instruction.kind === "wait" && instruction.verdict) {
       if (instruction.verdict === (state.callIndex % 2 === 0 ? "contain" : "trust")) steps.add("confirm");
       else next.outcome = "identity_stolen";
     }
@@ -126,7 +127,8 @@ export function applyResolution(state: GameState, raw: TurnResolution, degraded 
     }
   }
   if (fresh.length && !next.outcome) next.caption += hi ? ` उसने ${fresh.length} नया शब्द सीख लिया।` : ` It learned ${fresh.length} new ${fresh.length === 1 ? "word" : "words"}.`;
-  next.log = [{ id: id(), type: "caller", text: next.caption }, ...fresh.map((c) => ({ id: id(), type: "danger" as const, text: `${c.concept} +${c.severity}` })), ...state.log].slice(0, 16);
+  else if (repeated.length && !next.outcome) next.caption += hi ? " उसने अपने पुराने शब्द पहचान लिए।" : " It recognized words it already knows.";
+  next.log = [{ id: id(), type: "caller" as const, text: next.caption }, ...fresh.map((c) => ({ id: id(), type: "danger" as const, text: `${c.concept} +${c.severity}` })), ...state.log].slice(0, 16);
   persistProgress(next);
   return next;
 }

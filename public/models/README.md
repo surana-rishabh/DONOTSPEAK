@@ -19,6 +19,6 @@ Export binary glTF (`.glb`) with transforms applied, Y up, +Z forward, and the o
 - `wall_vent.glb`
 - `archive_clock.glb`
 
-The three supplied room and character GLBs are enabled. They use DRACO mesh compression, so the renderer loads the decoder from `public/draco/`. The room transform in `assets.json` is calibrated to the current surveillance scene; its floors and stairs remain visible, while interior wall meshes are hidden because they obscure the fixed cameras. Character meshes are recentered at their feet. Additional models can be enabled and tuned with `scale`, `position`, and `rotation`. A missing or disabled optional asset uses procedural fallback; a loading error is surfaced in the browser console and QA report.
+Only supplied caller/mimic GLBs are enabled and loaded. DRACO decoding is local in `public/draco/`. Characters are normalized to 1.75 m and recentered at their feet. The old room shell is disabled because its walls conflict with readable stations/cameras. Room/props are procedural, not generic manifest replacements. Failed character loads retain fallback actors and set canvas `data-models-error`, checked by QA. Replacing the room needs explicit camera/route calibration.
 
 The supplied files have not been confirmed as redistributable. Verify their original authors and licenses before making a public submission. Use only assets you can redistribute under the repository license or document their separate license clearly.
